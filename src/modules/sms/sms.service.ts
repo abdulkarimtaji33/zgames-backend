@@ -13,7 +13,7 @@ export class SmsService {
     const authToken = this.config.get<string>('twilio.authToken');
     this.fromNumber = this.config.get<string>('twilio.fromNumber') ?? '';
 
-    if (accountSid && authToken) {
+    if (accountSid && authToken && accountSid.startsWith('AC')) {
       this.client = twilio(accountSid, authToken);
     }
   }
