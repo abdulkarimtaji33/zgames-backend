@@ -10,6 +10,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import { User } from '../users/entities/user.entity';
+import { Role } from '../roles/entities/role.entity';
+import { Permission } from '../permissions/entities/permission.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { RefreshToken, TokenOwnerType } from './entities/refresh-token.entity';
 import { OAuthProvider, OAuthProviderType, OAuthOwnerType } from './entities/oauth-provider.entity';
@@ -22,6 +24,10 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Role)
+    private readonly roleRepo: Repository<Role>,
+    @InjectRepository(Permission)
+    private readonly permissionRepo: Repository<Permission>,
     @InjectRepository(Customer)
     private readonly customerRepo: Repository<Customer>,
     @InjectRepository(RefreshToken)
@@ -78,6 +84,75 @@ export class AuthService {
     await this.customerRepo.update(customer.id, { lastLoginAt: new Date() });
 
     return this.generateTokens(customer, 'customer', ipAddress, userAgent);
+  }
+
+  async bootstrapAdmin(): Promise<{ email: string; password: string; message: string }> {
+    const userCount = await this.userRepo.count();
+    if (userCount > 0) {
+      throw new BadRequestException('Admin bootstrap already completed');
+    }
+
+    const defaultRoles = [
+      { name: 'super_admin', description: 'Full access to everything', isSystem: true },
+      { name: 'admin', description: 'General admin access', isSystem: true },
+      { name: 'marketing_manager', description: 'Marketing and promotions', isSystem: true },
+      { name: 'warehouse_manager', description: 'Inventory and shipping', isSystem: true },
+      { name: 'finance_manager', description: 'Orders and payments', isSystem: true },
+      { name: 'customer_support', description: 'Customer service', isSystem: true },
+      { name: 'content_editor', description: 'Blog and CMS', isSystem: true },
+    ];
+
+    for (const roleData of defaultRoles) {
+      const exists = await this.roleRepo.findOne({ where: { name: roleData.name } });
+      if (!exists) await this.roleRepo.save(this.roleRepo.create(roleData));
+    }
+
+    const defaultPermissions = [
+      { resource: 'products', action: 'create' }, { resource: 'products', action: 'read' },
+      { resource: 'products', action: 'update' }, { resource: 'products', action: 'delete' },
+      { resource: 'orders', action: 'read' }, { resource: 'orders', action: 'update' },
+      { resource: 'orders', action: 'refund' }, { resource: 'customers', action: 'read' },
+      { resource: 'customers', action: 'update' }, { resource: 'inventory', action: 'manage' },
+      { resource: 'marketing', action: 'manage' }, { resource: 'reports', action: 'view' },
+      { resource: 'settings', action: 'manage' }, { resource: 'users', action: 'manage' },
+      { resource: 'blog', action: 'manage' }, { resource: 'support', action: 'manage' },
+    ];
+
+    for (const permData of defaultPermissions) {
+      const exists = await this.permissionRepo.findOne({
+        where: { resource: permData.resource, action: permData.action },
+      });
+      if (!exists) await this.permissionRepo.save(this.permissionRepo.create(permData));
+    }
+
+    const superAdminRole = await this.roleRepo.findOne({
+      where: { name: 'super_admin' },
+      relations: { permissions: true },
+    });
+    if (superAdminRole) {
+      superAdminRole.permissions = await this.permissionRepo.find();
+      await this.roleRepo.save(superAdminRole);
+    }
+
+    const email = 'admin@zgames.ae';
+    const password = 'Admin@123456';
+
+    const admin = this.userRepo.create({
+      email,
+      password,
+      firstName: 'Super',
+      lastName: 'Admin',
+      isActive: true,
+      isEmailVerified: true,
+      roles: superAdminRole ? [superAdminRole] : [],
+    });
+    await this.userRepo.save(admin);
+
+    return {
+      email,
+      password,
+      message: 'Default admin account created. Change the password after first login.',
+    };
   }
 
   async loginUser(

@@ -2,6 +2,7 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, TreeRepository } from 'typeorm';
 import { Category } from './entities/category.entity';
+import { Product } from '../products/entities/product.entity';
 import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto/category.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
 import slugify from 'slugify';
@@ -10,7 +11,18 @@ import slugify from 'slugify';
 export class CategoriesService {
   constructor(
     @InjectRepository(Category) private readonly repo: TreeRepository<Category>,
+    @InjectRepository(Product) private readonly productRepo: Repository<Product>,
   ) {}
+
+  async getProductCounts(): Promise<Record<string, number>> {
+    const rows = await this.productRepo.createQueryBuilder('p')
+      .select('p.categoryId', 'categoryId')
+      .addSelect('COUNT(*)', 'count')
+      .where('p.categoryId IS NOT NULL')
+      .groupBy('p.categoryId')
+      .getRawMany<{ categoryId: string; count: string }>();
+    return Object.fromEntries(rows.map((r) => [r.categoryId, Number(r.count)]));
+  }
 
   async findAll(query: CategoryQueryDto) {
     const { skip, take } = getPaginationOptions(query.page, query.limit);

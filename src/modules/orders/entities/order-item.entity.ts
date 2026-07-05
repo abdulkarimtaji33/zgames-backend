@@ -28,6 +28,14 @@ export class OrderItem extends AbstractEntity {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   discountAmount: number;
 
+  /** For gift_card-type products: the actual redemption codes delivered to the customer. */
+  @Column({ type: 'json', nullable: true })
+  deliveredCodes: string[] | null;
+
+  /** Fulfillment state for digital code delivery. 'pending' means admin needs to manually assign a code. */
+  @Column({ type: 'enum', enum: ['not_applicable', 'pending', 'fulfilled', 'partial'], default: 'not_applicable' })
+  fulfillmentStatus: 'not_applicable' | 'pending' | 'fulfilled' | 'partial';
+
   @ManyToOne(() => Order, (order) => order.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'orderId' })
   order: Order;

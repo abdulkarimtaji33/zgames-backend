@@ -30,6 +30,14 @@ export class UsersService {
     private readonly roleRepo: Repository<Role>,
   ) {}
 
+  async findAdmins(): Promise<User[]> {
+    return this.userRepo.createQueryBuilder('user')
+      .innerJoin('user.roles', 'role')
+      .where('role.name IN (:...names)', { names: ['super_admin', 'admin'] })
+      .andWhere('user.isActive = true')
+      .getMany();
+  }
+
   async findAll(query: UserQueryDto): Promise<PaginatedResult<User>> {
     const { skip, take } = getPaginationOptions(query.page, query.limit);
     const qb = this.userRepo.createQueryBuilder('user')

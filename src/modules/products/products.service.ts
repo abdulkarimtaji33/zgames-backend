@@ -10,7 +10,7 @@ import { ProductDownload } from './entities/product-download.entity';
 import {
   CreateProductDto, UpdateProductDto, ProductQueryDto,
   CreateProductVariantDto, UpdateProductVariantDto,
-  AddProductImageDto, SetRelatedProductsDto,
+  AddProductImageDto, SetRelatedProductsDto, ReorderImagesDto,
 } from './dto/product.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
 import slugify from 'slugify';
@@ -59,7 +59,10 @@ export class ProductsService {
   async findOne(id: string) {
     const p = await this.repo.findOne({
       where: { id },
-      relations: { brand: true, category: true, images: true, variants: true, specifications: true, faqs: true },
+      relations: {
+        brand: true, category: true, images: true, variants: true, specifications: true, faqs: true,
+        relatedProducts: true, upsellProducts: true, crossSellProducts: true,
+      },
     });
     if (!p) throw new NotFoundException('Product not found');
     return p;
@@ -149,7 +152,8 @@ export class ProductsService {
   async addImage(productId: string, dto: AddProductImageDto) {
     await this.findOne(productId);
     if (dto.isFeatured) await this.imageRepo.update({ productId }, { isFeatured: false });
-    return this.imageRepo.save(this.imageRepo.create({ ...dto, productId }));
+    const { alt, ...rest } = dto;
+    return this.imageRepo.save(this.imageRepo.create({ ...rest, altText: alt, productId }));
   }
 
   async removeImage(productId: string, imageId: string) {
@@ -162,6 +166,13 @@ export class ProductsService {
     await this.imageRepo.update({ productId }, { isFeatured: false });
     await this.imageRepo.update(imageId, { isFeatured: true });
     return this.imageRepo.findOne({ where: { id: imageId } });
+  }
+
+  async reorderImages(productId: string, dto: ReorderImagesDto) {
+    await Promise.all(dto.imageIds.map((imageId, index) =>
+      this.imageRepo.update({ id: imageId, productId }, { sortOrder: index }),
+    ));
+    return this.getImages(productId);
   }
 
   // ── Related products ──────────────────────────────────────────────────────

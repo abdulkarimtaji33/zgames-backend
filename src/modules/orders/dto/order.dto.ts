@@ -35,6 +35,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional() @IsOptional() @IsString() notes?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() shippingMethod?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) shippingCost?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() paymentMethod?: string;
 }
 
 export class UpdateOrderStatusDto {

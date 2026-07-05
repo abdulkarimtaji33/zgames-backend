@@ -28,6 +28,17 @@ export class ProductVariant extends AbstractEntity {
   @Column({ default: 0 })
   sortOrder: number;
 
+  /** Optional API supplier config for auto-restocking digital gift card codes when local pool runs low. */
+  @Column({ type: 'json', nullable: true })
+  giftCardSupplierConfig: {
+    enabled: boolean;
+    apiUrl: string;
+    apiKey?: string;
+    method?: 'GET' | 'POST';
+    bodyTemplate?: string;
+    codePath?: string;
+  } | null;
+
   @ManyToOne(() => Product, (product) => product.variants, {
     onDelete: 'CASCADE',
   })

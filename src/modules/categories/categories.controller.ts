@@ -15,6 +15,10 @@ export class CategoriesController {
   @Public() @Get('tree') @ApiOperation({ summary: 'Get full category tree' })
   getTree() { return this.svc.getTree(); }
 
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin')
+  @Get('product-counts') @ApiOperation({ summary: 'Get product count per category' })
+  getProductCounts() { return this.svc.getProductCounts(); }
+
   @Public() @Get('roots') @ApiOperation({ summary: 'Get root categories' })
   getRoots() { return this.svc.getRoots(); }
 

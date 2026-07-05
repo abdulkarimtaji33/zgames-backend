@@ -60,6 +60,14 @@ export class AuthController {
   }
 
   @Public()
+  @Post('bootstrap')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create default roles, permissions, and super admin (first run only)' })
+  async bootstrapAdmin(): Promise<{ email: string; password: string; message: string }> {
+    return this.authService.bootstrapAdmin();
+  }
+
+  @Public()
   @Post('admin/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login as admin/staff user' })

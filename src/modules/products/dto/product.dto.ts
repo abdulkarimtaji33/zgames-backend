@@ -1,6 +1,8 @@
-﻿import { IsString, IsOptional, IsBoolean, IsNumber, Min, IsArray, IsUUID, IsEnum, IsDecimal } from 'class-validator';
+﻿import { IsString, IsOptional, IsBoolean, IsNumber, Min, IsArray, IsUUID, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+
+const toBoolean = ({ value }: { value: unknown }) => (typeof value === 'string' ? value === 'true' : Boolean(value));
 import { ProductType, ProductPlatform, ProductRegion, ProductGenre } from '../entities/product.entity';
 
 export class CreateProductDto {
@@ -54,10 +56,10 @@ export class ProductQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsEnum(ProductPlatform) platform?: ProductPlatform;
   @ApiPropertyOptional() @IsOptional() @IsEnum(ProductRegion) region?: ProductRegion;
   @ApiPropertyOptional() @IsOptional() @IsEnum(ProductGenre) genre?: ProductGenre;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() isFeatured?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() isPreorder?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() isComingSoon?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isFeatured?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isPreorder?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isComingSoon?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) minPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) maxPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() sortBy?: string;
@@ -73,4 +75,8 @@ export class AddProductImageDto {
 
 export class SetRelatedProductsDto {
   @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) productIds: string[];
+}
+
+export class ReorderImagesDto {
+  @ApiProperty({ type: [String] }) @IsArray() @IsUUID('4', { each: true }) imageIds: string[];
 }

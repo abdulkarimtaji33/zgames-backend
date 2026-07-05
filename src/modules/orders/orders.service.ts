@@ -1,6 +1,6 @@
-﻿import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
@@ -9,16 +9,30 @@ import { ShipmentTracking } from './entities/shipment-tracking.entity';
 import { CreateOrderDto, UpdateOrderStatusDto, OrderQueryDto } from './dto/order.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
 import { MailService } from '../mail/mail.service';
+import { SettingsService } from '../settings/settings.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationRecipientType } from '../notifications/entities/notification.entity';
+import { UsersService } from '../users/users.service';
+import { Product, ProductType } from '../products/entities/product.entity';
+import { forwardRef, Inject } from '@nestjs/common';
+import { GiftCardCodesService } from '../products/gift-card-codes/gift-card-codes.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order) private readonly repo: Repository<Order>,
     @InjectRepository(OrderItem) private readonly itemRepo: Repository<OrderItem>,
     @InjectRepository(OrderStatusHistory) private readonly historyRepo: Repository<OrderStatusHistory>,
     @InjectRepository(Shipment) private readonly shipmentRepo: Repository<Shipment>,
     @InjectRepository(ShipmentTracking) private readonly trackingRepo: Repository<ShipmentTracking>,
+    @InjectRepository(Product) private readonly productRepo: Repository<Product>,
     private readonly mailService: MailService,
+    private readonly settingsService: SettingsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly usersService: UsersService,
+    @Inject(forwardRef(() => GiftCardCodesService)) private readonly giftCardCodesService: GiftCardCodesService,
   ) {}
 
   private generateOrderNumber(): string {
@@ -68,7 +82,7 @@ export class OrdersService {
     const { items, ...rest } = dto;
     const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
     const shippingAmount = dto.shippingCost ?? 0;
-    const total = subtotal + shippingAmount;
+    const total = Math.max(0, subtotal + shippingAmount);
 
     const orderEntity = this.repo.create({
       orderNumber: this.generateOrderNumber(),
@@ -87,20 +101,174 @@ export class OrdersService {
     } as never);
     const order = await this.repo.save(orderEntity as never) as unknown as Order;
 
-    const orderItems = items.map((item) => this.itemRepo.create({
-      orderId: order.id,
-      productId: item.productId,
-      variantId: item.variantId ?? null,
-      productSnapshot: {} as Record<string, unknown>,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.quantity * item.unitPrice,
-    }));
+    const products = await this.productRepo.find({ where: { id: In(items.map((i) => i.productId)) } });
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const orderItems = items.map((item) => {
+      const product = productById.get(item.productId);
+      return this.itemRepo.create({
+        orderId: order.id,
+        productId: item.productId,
+        variantId: item.variantId ?? null,
+        productSnapshot: product
+          ? { name: product.name, sku: product.sku, type: product.type, slug: product.slug }
+          : ({} as Record<string, unknown>),
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.quantity * item.unitPrice,
+        fulfillmentStatus: product?.type === ProductType.GIFT_CARD ? 'pending' : 'not_applicable',
+      });
+    });
     await this.itemRepo.save(orderItems);
 
     await this.historyRepo.save(this.historyRepo.create({ orderId: order.id, status: OrderStatus.PENDING, note: 'Order placed', isCustomerVisible: true }));
 
-    return this.findOne(order.id);
+    const fullOrder = await this.findOne(order.id);
+
+    // Cash-on-delivery orders are confirmed immediately (no payment webhook will ever fire for them).
+    if ((dto.paymentMethod ?? '').toLowerCase() === 'cod') {
+      this.notifyNewOrder(fullOrder).catch((err) => this.logger.error(`Failed to send new-order notifications: ${err}`));
+    }
+
+    return fullOrder;
+  }
+
+  /** Sends the customer order-confirmation email, an admin alert email, and an in-app admin notification. */
+  private async notifyNewOrder(order: Order): Promise<void> {
+    const items = (order.items ?? []).map((i) => ({
+      name: (i.productSnapshot as { name?: string })?.name ?? 'Item',
+      quantity: i.quantity,
+      unitPrice: Number(i.unitPrice),
+    }));
+
+    if (order.customer?.email) {
+      await this.mailService.sendOrderConfirmation(
+        order.customer.email,
+        order.customer.firstName,
+        order.orderNumber,
+        Number(order.total),
+        order.currency,
+      ).catch(() => {});
+    }
+
+    const adminEmail = (await this.settingsService.getTyped<string>('admin_notification_email')) || process.env.ADMIN_NOTIFICATION_EMAIL;
+    const customerName = order.customer ? `${order.customer.firstName} ${order.customer.lastName}` : 'Guest';
+    const customerEmail = order.customer?.email ?? 'N/A';
+
+    if (adminEmail) {
+      await this.mailService.sendNewOrderAdminAlert(
+        adminEmail,
+        order.orderNumber,
+        customerName,
+        customerEmail,
+        Number(order.total),
+        order.currency,
+        items,
+      ).catch(() => {});
+    }
+
+    try {
+      const admins = await this.usersService.findAdmins();
+      await Promise.all(admins.map((admin) =>
+        this.notificationsService.createNotification(
+          admin.id,
+          NotificationRecipientType.USER,
+          'new_order',
+          `New order #${order.orderNumber}`,
+          `${customerName} placed an order for ${order.currency} ${Number(order.total).toFixed(2)}`,
+          { orderId: order.id },
+        ),
+      ));
+    } catch (err) {
+      this.logger.error(`Failed to create admin in-app notifications: ${err}`);
+    }
+  }
+
+  /** Assigns real redemption codes (from local inventory or a configured supplier API) for each gift_card-type
+   * item in a paid order, and emails them to the customer. Flags items as 'pending' for admin follow-up if stock
+   * runs short. */
+  private async fulfillGiftCards(order: Order): Promise<void> {
+    const giftItems = (order.items ?? []).filter((i) => (i.productSnapshot as { type?: string })?.type === ProductType.GIFT_CARD);
+    if (giftItems.length === 0) return;
+
+    const recipientEmail = order.customer?.email;
+    const recipientName = order.customer?.firstName ?? 'there';
+
+    for (const item of giftItems) {
+      try {
+        const { codes, shortfall } = await this.giftCardCodesService.assignCodesForOrderItem({
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          orderId: order.id,
+          orderItemId: item.id,
+          customerId: order.customerId ?? null,
+        });
+
+        await this.itemRepo.update(item.id, {
+          deliveredCodes: codes.length ? codes : null,
+          fulfillmentStatus: shortfall > 0 ? (codes.length ? 'partial' : 'pending') : 'fulfilled',
+        });
+
+        const productName = (item.productSnapshot as { name?: string })?.name ?? 'Gift Card';
+
+        if (codes.length && recipientEmail) {
+          await this.mailService.sendGiftCardDelivery(recipientEmail, recipientName, productName, codes, order.orderNumber).catch(() => {});
+        }
+
+        if (shortfall > 0) {
+          this.logger.warn(`Gift card fulfillment shortfall of ${shortfall} for order ${order.orderNumber}, item ${item.id}`);
+          const adminEmail = (await this.settingsService.getTyped<string>('admin_notification_email')) || process.env.ADMIN_NOTIFICATION_EMAIL;
+          if (adminEmail) {
+            await this.mailService.sendGiftCardShortfallAlert(adminEmail, order.orderNumber, productName, shortfall).catch(() => {});
+          }
+          const admins = await this.usersService.findAdmins();
+          await Promise.all(admins.map((admin) =>
+            this.notificationsService.createNotification(
+              admin.id,
+              NotificationRecipientType.USER,
+              'gift_card_shortfall',
+              `Gift card stock needed — order #${order.orderNumber}`,
+              `${shortfall} more code(s) needed for "${productName}". Please fulfill manually.`,
+              { orderId: order.id, orderItemId: item.id },
+            ),
+          ));
+        }
+      } catch (err) {
+        this.logger.error(`Failed to fulfill gift card codes for order ${order.orderNumber}: ${err}`);
+      }
+    }
+  }
+
+  /** Lets an admin manually assign a redemption code to an order item stuck pending fulfillment. */
+  async manuallyFulfillItem(orderId: string, itemId: string, code: string) {
+    const order = await this.findOne(orderId);
+    const item = (order.items ?? []).find((i) => i.id === itemId);
+    if (!item) throw new NotFoundException('Order item not found');
+
+    await this.giftCardCodesService.manuallyAssignCode({
+      productId: item.productId,
+      variantId: item.variantId,
+      orderId: order.id,
+      orderItemId: item.id,
+      customerId: order.customerId ?? null,
+      code,
+    });
+
+    const existingCodes = item.deliveredCodes ?? [];
+    const updatedCodes = [...existingCodes, code.trim()];
+    const isComplete = updatedCodes.length >= item.quantity;
+    await this.itemRepo.update(item.id, {
+      deliveredCodes: updatedCodes,
+      fulfillmentStatus: isComplete ? 'fulfilled' : 'partial',
+    });
+
+    const productName = (item.productSnapshot as { name?: string })?.name ?? 'Gift Card';
+    if (order.customer?.email) {
+      await this.mailService.sendGiftCardDelivery(order.customer.email, order.customer.firstName, productName, [code.trim()], order.orderNumber).catch(() => {});
+    }
+
+    return this.findOne(orderId);
   }
 
   async updateStatus(id: string, dto: UpdateOrderStatusDto, changedBy?: string) {
@@ -126,7 +294,14 @@ export class OrdersService {
 
   async updatePaymentStatus(id: string, status: PaymentStatus) {
     await this.repo.update(id, { paymentStatus: status });
-    return this.findOne(id);
+    const order = await this.findOne(id);
+
+    if (status === PaymentStatus.PAID) {
+      this.notifyNewOrder(order).catch((err) => this.logger.error(`Failed to send new-order notifications: ${err}`));
+      this.fulfillGiftCards(order).catch((err) => this.logger.error(`Failed to fulfill gift cards: ${err}`));
+    }
+
+    return order;
   }
 
   async addShipment(orderId: string, data: { carrier: string; trackingNumber: string; trackingUrl?: string }) {

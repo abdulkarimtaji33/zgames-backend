@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
+import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 
 class GenerateBatchDto {
   @ApiProperty() @IsNumber() @Min(1) @Type(() => Number) count: number;
@@ -21,6 +22,7 @@ export class GiftCardsController {
   constructor(private readonly svc: GiftCardsService) {}
   @Public() @Post('check') check(@Body() dto: CheckGiftCardDto) { return this.svc.check(dto.code); }
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('redeem') redeem(@Body() dto: RedeemGiftCardDto) { return this.svc.redeem(dto); }
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('mine') findMine(@CurrentUser() user: { id: string }) { return this.svc.findMine(user.id); }
   @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin', 'marketing_manager')
   @Get() findAll() { return this.svc.findAll(); }
   @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin', 'marketing_manager')

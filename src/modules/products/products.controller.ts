@@ -4,7 +4,7 @@ import { ProductsService } from './products.service';
 import {
   CreateProductDto, UpdateProductDto, ProductQueryDto,
   CreateProductVariantDto, UpdateProductVariantDto,
-  AddProductImageDto, SetRelatedProductsDto,
+  AddProductImageDto, SetRelatedProductsDto, ReorderImagesDto,
 } from './dto/product.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -50,6 +50,10 @@ export class ProductsController {
   @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin')
   @Delete(':id/images/:imageId') @HttpCode(HttpStatus.NO_CONTENT)
   removeImage(@Param('id', ParseUUIDPipe) id: string, @Param('imageId', ParseUUIDPipe) imageId: string) { return this.svc.removeImage(id, imageId); }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin')
+  @Patch(':id/images/reorder') @ApiOperation({ summary: 'Reorder product images' })
+  reorderImages(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ReorderImagesDto) { return this.svc.reorderImages(id, dto); }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles('super_admin', 'admin')
   @Patch(':id/related') setRelated(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetRelatedProductsDto) { return this.svc.setRelated(id, dto); }

@@ -20,6 +20,10 @@ export class GiftCardsService {
 
   findAll() { return this.repo.find({ order: { createdAt: 'DESC' } }); }
 
+  findMine(customerId: string) {
+    return this.repo.find({ where: { purchasedByCustomerId: customerId }, order: { createdAt: 'DESC' } });
+  }
+
   async findOne(id: string) {
     const gc = await this.repo.findOne({ where: { id }, relations: { usages: true } });
     if (!gc) throw new NotFoundException('Gift card not found');
@@ -32,7 +36,7 @@ export class GiftCardsService {
     return { code: gc.code, currentBalance: gc.currentBalance, isActive: gc.isActive, expiresAt: gc.expiresAt };
   }
 
-  async create(amount: number, expiresAt?: Date, sentToEmail?: string) {
+  async create(amount: number, expiresAt?: Date, sentToEmail?: string, purchasedByCustomerId?: string) {
     const code = this.generateCode();
     return this.repo.save(this.repo.create({
       code,
@@ -41,7 +45,7 @@ export class GiftCardsService {
       isActive: true,
       expiresAt: expiresAt ?? null,
       sentToEmail: sentToEmail ?? null,
-      purchasedByCustomerId: null,
+      purchasedByCustomerId: purchasedByCustomerId ?? null,
     }));
   }
 

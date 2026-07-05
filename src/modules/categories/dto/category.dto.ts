@@ -1,6 +1,8 @@
 ﻿import { IsString, IsOptional, IsBoolean, IsNumber, Min, IsUUID } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+
+const toBoolean = ({ value }: { value: unknown }) => (typeof value === 'string' ? value === 'true' : Boolean(value));
 
 export class CreateCategoryDto {
   @ApiProperty() @IsString() name: string;
@@ -18,6 +20,6 @@ export class CategoryQueryDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) page?: number = 1;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) limit?: number = 50;
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsUUID() parentId?: string;
 }

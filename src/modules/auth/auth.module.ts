@@ -13,6 +13,7 @@ import { OAuthProvider } from './entities/oauth-provider.entity';
 import { User } from '../users/entities/user.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Role } from '../roles/entities/role.entity';
+import { Permission } from '../permissions/entities/permission.entity';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { Role } from '../roles/entities/role.entity';
       User,
       Customer,
       Role,
+      Permission,
     ]),
   ],
   providers: [AuthService, JwtStrategy, GoogleStrategy, FacebookStrategy],
