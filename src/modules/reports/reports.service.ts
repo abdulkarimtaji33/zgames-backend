@@ -18,9 +18,9 @@ export class ReportsService {
 
   async getRevenueSummary(filter: ReportFilterDto) {
     const qb = this.orderRepo.createQueryBuilder('o')
-      .select('SUM(o.totalAmount)', 'revenue')
+      .select('SUM(o.total)', 'revenue')
       .addSelect('COUNT(o.id)', 'orderCount')
-      .addSelect('AVG(o.totalAmount)', 'aov')
+      .addSelect('AVG(o.total)', 'aov')
       .where('o.paymentStatus = :ps', { ps: 'paid' });
     if (filter.startDate) qb.andWhere('o.createdAt >= :s', { s: filter.startDate });
     if (filter.endDate) qb.andWhere('o.createdAt <= :e', { e: filter.endDate });
@@ -31,7 +31,7 @@ export class ReportsService {
     const groupExpr = filter.groupBy === 'month' ? 'DATE_FORMAT(o.createdAt, "%Y-%m")' : filter.groupBy === 'week' ? 'YEARWEEK(o.createdAt)' : 'DATE(o.createdAt)';
     const qb = this.orderRepo.createQueryBuilder('o')
       .select(groupExpr, 'period')
-      .addSelect('SUM(o.totalAmount)', 'revenue')
+      .addSelect('SUM(o.total)', 'revenue')
       .addSelect('COUNT(o.id)', 'orders')
       .where('o.paymentStatus = :ps', { ps: 'paid' })
       .groupBy('period').orderBy('period', 'ASC');
@@ -53,8 +53,9 @@ export class ReportsService {
   async getTopProducts(filter: ReportFilterDto) {
     return this.productRepo.createQueryBuilder('p')
       .select('p.id', 'id').addSelect('p.name', 'name').addSelect('p.slug', 'slug')
-      .addSelect('p.totalSales', 'totalSales').addSelect('p.rating', 'rating')
-      .orderBy('p.totalSales', 'DESC').limit(filter.limit ?? 10).getRawMany();
+      .addSelect('p.reviewCount', 'reviewCount').addSelect('p.avgRating', 'avgRating')
+      .orderBy('p.reviewCount', 'DESC').addOrderBy('p.avgRating', 'DESC')
+      .limit(filter.limit ?? 10).getRawMany();
   }
 
   async getCustomerStats(filter: ReportFilterDto) {

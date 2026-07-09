@@ -13,13 +13,17 @@ export class ReviewsService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async findAll(query: ReviewQueryDto) {
+  async findAll(query: ReviewQueryDto, isStaff = false) {
     const { skip, take } = getPaginationOptions(query.page, query.limit);
     const qb = this.repo.createQueryBuilder('r')
       .leftJoinAndSelect('r.customer', 'customer')
       .leftJoinAndSelect('r.product', 'product')
       .skip(skip).take(take).orderBy('r.createdAt', 'DESC');
-    if (query.status) qb.andWhere('r.status = :s', { s: query.status });
+    if (!isStaff) {
+      qb.andWhere('r.status = :s', { s: ReviewStatus.APPROVED });
+    } else if (query.status) {
+      qb.andWhere('r.status = :s', { s: query.status });
+    }
     if (query.productId) qb.andWhere('r.productId = :pid', { pid: query.productId });
     if (query.customerId) qb.andWhere('r.customerId = :cid', { cid: query.customerId });
     const [items, total] = await qb.getManyAndCount();

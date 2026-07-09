@@ -7,13 +7,21 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import type { Request } from 'express';
+import { Req } from '@nestjs/common';
+
+function isStaffRequest(req: Request): boolean {
+  const user = req.user as { roles?: unknown } | null | undefined;
+  return Boolean(user && Array.isArray(user.roles));
+}
 
 @ApiTags('Reviews')
 @Controller('reviews')
 export class ReviewsController {
   constructor(private readonly svc: ReviewsService) {}
 
-  @Public() @Get() findAll(@Query() q: ReviewQueryDto) { return this.svc.findAll(q); }
+  @UseGuards(OptionalJwtAuthGuard) @Get() findAll(@Query() q: ReviewQueryDto, @Req() req: Request) { return this.svc.findAll(q, isStaffRequest(req)); }
   @Public() @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard)

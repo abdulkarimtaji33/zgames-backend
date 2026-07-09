@@ -21,5 +21,6 @@ export class CategoryQueryDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) limit?: number = 50;
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isActive?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isFeatured?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsUUID() parentId?: string;
 }

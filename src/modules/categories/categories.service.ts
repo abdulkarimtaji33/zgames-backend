@@ -32,6 +32,7 @@ export class CategoriesService {
       .orderBy('c.sortOrder', 'ASC').addOrderBy('c.name', 'ASC');
     if (query.search) qb.andWhere('c.name LIKE :s', { s: `%${query.search}%` });
     if (query.isActive !== undefined) qb.andWhere('c.isActive = :a', { a: query.isActive });
+    if (query.isFeatured !== undefined) qb.andWhere('c.isFeatured = :f', { f: query.isFeatured });
     if (query.parentId) qb.andWhere('parent.id = :pid', { pid: query.parentId });
     else if (query.parentId === null) qb.andWhere('c.parent IS NULL');
     const [items, total] = await qb.getManyAndCount();

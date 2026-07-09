@@ -49,7 +49,7 @@ export class ProductsService {
     if (query.minPrice !== undefined) qb.andWhere('p.price >= :min', { min: query.minPrice });
     if (query.maxPrice !== undefined) qb.andWhere('p.price <= :max', { max: query.maxPrice });
     if (query.categoryId) {
-      qb.leftJoin('p.categories', 'cat').andWhere('cat.id = :cid', { cid: query.categoryId });
+      qb.andWhere('p.categoryId = :cid', { cid: query.categoryId });
     }
 
     const sortField = ['price', 'name', 'createdAt', 'avgRating', 'reviewCount'].includes(query.sortBy ?? '')

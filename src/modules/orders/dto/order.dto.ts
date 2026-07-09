@@ -23,7 +23,7 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
-  @ApiProperty() @IsUUID() customerId: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() customerId?: string;
   @ApiProperty({ type: OrderAddressDto }) @ValidateNested() @Type(() => OrderAddressDto) shippingAddress: OrderAddressDto;
   @ApiPropertyOptional() @IsOptional() @ValidateNested() @Type(() => OrderAddressDto) billingAddress?: OrderAddressDto;
   @ApiProperty({ type: [CreateOrderItemDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => CreateOrderItemDto) items: CreateOrderItemDto[];

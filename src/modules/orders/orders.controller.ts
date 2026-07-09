@@ -7,6 +7,10 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import type { Request } from 'express';
+import { Req } from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -38,7 +42,13 @@ export class OrdersController {
   @Get('track/:orderNumber') @ApiOperation({ summary: 'Track order by number (public)' })
   track(@Param('orderNumber') orderNumber: string) { return this.svc.findByOrderNumber(orderNumber); }
 
-  @Post() create(@Body() dto: CreateOrderDto) { return this.svc.create(dto); }
+  @Public() @UseGuards(OptionalJwtAuthGuard)
+  @Post() create(@Body() dto: CreateOrderDto, @Req() req: Request) {
+    const user = req.user as { id?: string; roles?: unknown } | null | undefined;
+    const isCustomer = Boolean(user && !Array.isArray(user.roles));
+    if (isCustomer && user?.id) dto.customerId = user.id;
+    return this.svc.create(dto);
+  }
 
   @UseGuards(RolesGuard) @Roles('super_admin', 'admin', 'customer_support')
   @Patch(':id/status') updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateOrderStatusDto, @CurrentUser() user: { id: string }) {
