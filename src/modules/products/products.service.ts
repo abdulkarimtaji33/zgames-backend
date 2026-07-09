@@ -26,7 +26,7 @@ export class ProductsService {
     @InjectRepository(ProductDownload) private readonly downloadRepo: Repository<ProductDownload>,
   ) {}
 
-  async findAll(query: ProductQueryDto) {
+  async findAll(query: ProductQueryDto, isStaff = false) {
     const { skip, take } = getPaginationOptions(query.page, query.limit);
     const qb = this.repo.createQueryBuilder('p')
       .leftJoinAndSelect('p.brand', 'brand')
@@ -34,7 +34,11 @@ export class ProductsService {
       .skip(skip).take(take);
 
     if (query.search) qb.andWhere('(p.name LIKE :s OR p.sku LIKE :s OR p.barcode LIKE :s)', { s: `%${query.search}%` });
-    if (query.isActive !== undefined) qb.andWhere('p.isActive = :a', { a: query.isActive });
+    if (!isStaff) {
+      qb.andWhere('p.isActive = :a', { a: true });
+    } else if (query.isActive !== undefined) {
+      qb.andWhere('p.isActive = :a', { a: query.isActive });
+    }
     if (query.isFeatured !== undefined) qb.andWhere('p.isFeatured = :f', { f: query.isFeatured });
     if (query.isPreorder !== undefined) qb.andWhere('p.isPreorder = :pre', { pre: query.isPreorder });
     if (query.isComingSoon !== undefined) qb.andWhere('p.isComingSoon = :cs', { cs: query.isComingSoon });
@@ -56,7 +60,7 @@ export class ProductsService {
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, isStaff = false) {
     const p = await this.repo.findOne({
       where: { id },
       relations: {
@@ -65,15 +69,17 @@ export class ProductsService {
       },
     });
     if (!p) throw new NotFoundException('Product not found');
+    if (!isStaff && !p.isActive) throw new NotFoundException('Product not found');
     return p;
   }
 
-  async findBySlug(slug: string) {
+  async findBySlug(slug: string, isStaff = false) {
     const p = await this.repo.findOne({
       where: { slug },
       relations: { brand: true, category: true, images: true, variants: true, specifications: true, faqs: true },
     });
     if (!p) throw new NotFoundException('Product not found');
+    if (!isStaff && !p.isActive) throw new NotFoundException('Product not found');
     return p;
   }
 

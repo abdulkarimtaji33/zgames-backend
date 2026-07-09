@@ -10,15 +10,23 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
+import type { Request } from 'express';
+import { Req } from '@nestjs/common';
+
+function isStaffRequest(req: Request): boolean {
+  const user = req.user as { roles?: unknown } | null | undefined;
+  return Boolean(user && Array.isArray(user.roles));
+}
 
 @ApiTags('Products')
 @Controller('products')
 export class ProductsController {
   constructor(private readonly svc: ProductsService) {}
 
-  @Public() @Get() findAll(@Query() query: ProductQueryDto) { return this.svc.findAll(query); }
-  @Public() @Get('by-slug/:slug') findBySlug(@Param('slug') slug: string) { return this.svc.findBySlug(slug); }
-  @Public() @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
+  @UseGuards(OptionalJwtAuthGuard) @Get() findAll(@Query() query: ProductQueryDto, @Req() req: Request) { return this.svc.findAll(query, isStaffRequest(req)); }
+  @UseGuards(OptionalJwtAuthGuard) @Get('by-slug/:slug') findBySlug(@Param('slug') slug: string, @Req() req: Request) { return this.svc.findBySlug(slug, isStaffRequest(req)); }
+  @UseGuards(OptionalJwtAuthGuard) @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) { return this.svc.findOne(id, isStaffRequest(req)); }
   @Public() @Get(':id/images') getImages(@Param('id', ParseUUIDPipe) id: string) { return this.svc.getImages(id); }
   @Public() @Get(':id/variants') getVariants(@Param('id', ParseUUIDPipe) id: string) { return this.svc.getVariants(id); }
 
