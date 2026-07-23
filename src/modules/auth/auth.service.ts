@@ -134,7 +134,7 @@ export class AuthService {
       await this.roleRepo.save(superAdminRole);
     }
 
-    const email = 'admin@zgames.ae';
+    const email = 'admin@cgagames.com';
     const password = 'Admin@123456';
 
     const admin = this.userRepo.create({

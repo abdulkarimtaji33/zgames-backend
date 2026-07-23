@@ -1,9 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: 'zgames-api',
+      name: 'cgagames-api',
       script: 'dist/main.js',
-      cwd: '/var/www/zgames-backend',
+      cwd: '/var/www/cgagames-backend',
       instances: 1,
       autorestart: true,
       watch: false,

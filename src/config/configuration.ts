@@ -7,7 +7,7 @@ export default () => ({
     port: parseInt(process.env.DB_PORT ?? '3306', 10),
     username: process.env.DB_USERNAME ?? 'root',
     password: process.env.DB_PASSWORD ?? '',
-    name: process.env.DB_NAME ?? 'zgames',
+    name: process.env.DB_NAME ?? 'cgagames',
   },
   jwt: {
     secret: process.env.JWT_SECRET ?? 'change-me-in-production',
@@ -26,7 +26,7 @@ export default () => ({
   },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? '',
-    fromEmail: process.env.RESEND_FROM_EMAIL ?? 'noreply@zgames.ae',
+    fromEmail: process.env.RESEND_FROM_EMAIL ?? 'noreply@cgagames.com',
   },
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID ?? '',

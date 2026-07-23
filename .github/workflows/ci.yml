@@ -15,7 +15,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: zgames
+          MYSQL_DATABASE: cgagames
         ports:
           - 3306:3306
         options: >-
@@ -47,7 +47,7 @@ jobs:
           DB_PORT: 3306
           DB_USERNAME: root
           DB_PASSWORD: root
-          DB_NAME: zgames
+          DB_NAME: cgagames
 
       - name: Test
         run: npm test -- --passWithNoTests

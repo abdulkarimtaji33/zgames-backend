@@ -18,7 +18,7 @@ export class MailService {
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('resend.apiKey');
     this.resend = apiKey ? new Resend(apiKey) : null;
-    this.fromEmail = this.config.get<string>('resend.fromEmail') ?? 'noreply@zgames.ae';
+    this.fromEmail = this.config.get<string>('resend.fromEmail') ?? 'noreply@cgagames.com';
   }
 
   async send(options: SendMailOptions): Promise<void> {
@@ -42,7 +42,7 @@ export class MailService {
   async sendWelcome(to: string, firstName: string): Promise<void> {
     await this.send({
       to,
-      subject: 'Welcome to ZGames!',
+      subject: 'Welcome to CGA Games!',
       html: this.welcomeTemplate(firstName),
     });
   }
@@ -60,7 +60,7 @@ export class MailService {
     const resetUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password?token=${token}`;
     await this.send({
       to,
-      subject: 'Reset your ZGames password',
+      subject: 'Reset your CGA Games password',
       html: this.passwordResetTemplate(firstName, resetUrl),
     });
   }
@@ -166,11 +166,11 @@ export class MailService {
         </head>
         <body>
           <div class="container">
-            <div class="logo"><h1>ZGAMES</h1></div>
+            <div class="logo"><h1>CGA GAMES</h1></div>
             <div class="card">${content}</div>
             <div class="footer">
-              <p>© ${new Date().getFullYear()} ZGames. All rights reserved.</p>
-              <p>Dubai, UAE | support@zgames.ae</p>
+              <p>© ${new Date().getFullYear()} CGA Games. All rights reserved.</p>
+              <p>Dubai, UAE | support@cgagames.com</p>
             </div>
           </div>
         </body>
@@ -180,7 +180,7 @@ export class MailService {
 
   private welcomeTemplate(firstName: string): string {
     return this.baseTemplate(`
-      <h2>Welcome to ZGames, ${firstName}! 🎮</h2>
+      <h2>Welcome to CGA Games, ${firstName}! 🎮</h2>
       <p>Your account has been successfully created. You're now part of the ultimate gaming community in the GCC.</p>
       <p>Start exploring thousands of games, consoles, accessories, and collectibles.</p>
       <a href="${process.env.FRONTEND_URL ?? 'http://localhost:3000'}" class="btn">Shop Now</a>

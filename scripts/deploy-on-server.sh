@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ZGames backend deploy on VPS (does not touch clearearth or other apps)
-FRONTEND_PORT="${ZGAMES_FRONTEND_PORT:-5555}"
-BACKEND_PORT="${ZGAMES_BACKEND_PORT:-3330}"
-WEB_INTERNAL_PORT="${ZGAMES_WEB_INTERNAL_PORT:-5556}"
-BACKEND_DIR="/var/www/zgames-backend"
-FRONTEND_DIR="/var/www/zgames-frontend"
-NGINX_SITE="/etc/nginx/sites-available/zgames"
-PM2_API="zgames-api"
-PM2_WEB="zgames-web"
+# CGA Games backend deploy on VPS (does not touch clearearth or other apps)
+FRONTEND_PORT="${CGAGAMES_FRONTEND_PORT:-5555}"
+BACKEND_PORT="${CGAGAMES_BACKEND_PORT:-3330}"
+WEB_INTERNAL_PORT="${CGAGAMES_WEB_INTERNAL_PORT:-5555}"
+BACKEND_DIR="/var/www/cgagames-backend"
+FRONTEND_DIR="/var/www/cgagames-frontend"
+NGINX_SITE="/etc/nginx/sites-available/cgagames"
+PM2_API="cgagames-api"
+PM2_WEB="cgagames-web"
 BACKEND_REPO="https://github.com/abdulkarimtaji33/zgames-backend.git"
 FRONTEND_REPO="https://github.com/abdulkarimtaji33/zgames-frontend.git"
 
@@ -88,7 +88,7 @@ server {
 }
 EOF
 
-  ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/zgames
+  ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/cgagames
   nginx -t
   systemctl reload nginx
   ufw allow "$FRONTEND_PORT/tcp" || true
@@ -120,7 +120,7 @@ deploy_frontend() {
   fi
 }
 
-log "ZGames deploy starting (frontend :$FRONTEND_PORT, backend :$BACKEND_PORT)"
+log "CGA Games deploy starting (frontend :$FRONTEND_PORT, backend :$BACKEND_PORT)"
 deploy_backend
 deploy_frontend
 setup_nginx
@@ -128,4 +128,4 @@ pm2 save || true
 log "Deploy complete"
 log "Frontend: http://72.60.223.25:$FRONTEND_PORT/"
 log "API docs: http://72.60.223.25:$FRONTEND_PORT/api/docs"
-pm2 list | grep -E 'zgames-api|zgames-web' || pm2 list
+pm2 list | grep -E 'cgagames-api|cgagames-web' || pm2 list

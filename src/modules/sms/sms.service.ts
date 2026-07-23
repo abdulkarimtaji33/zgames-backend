@@ -31,18 +31,18 @@ export class SmsService {
   }
 
   async sendOtp(to: string, otp: string): Promise<void> {
-    await this.send(to, `Your ZGames OTP is: ${otp}. Valid for 10 minutes. Do not share this code.`);
+    await this.send(to, `Your CGA Games OTP is: ${otp}. Valid for 10 minutes. Do not share this code.`);
   }
 
   async sendOrderConfirmation(to: string, orderNumber: string): Promise<void> {
-    await this.send(to, `ZGames: Your order #${orderNumber} has been confirmed. Thank you for shopping with us!`);
+    await this.send(to, `CGA Games: Your order #${orderNumber} has been confirmed. Thank you for shopping with us!`);
   }
 
   async sendShippingUpdate(to: string, orderNumber: string, trackingNumber: string): Promise<void> {
-    await this.send(to, `ZGames: Order #${orderNumber} has shipped! Track with: ${trackingNumber}`);
+    await this.send(to, `CGA Games: Order #${orderNumber} has shipped! Track with: ${trackingNumber}`);
   }
 
   async sendAbandonedCart(to: string): Promise<void> {
-    await this.send(to, `ZGames: You have items waiting in your cart! Complete your purchase now.`);
+    await this.send(to, `CGA Games: You have items waiting in your cart! Complete your purchase now.`);
   }
 }

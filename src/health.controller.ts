@@ -11,7 +11,7 @@ export class HealthController {
   check() {
     return {
       status: 'ok',
-      service: 'zgames-backend',
+      service: 'cgagames-backend',
       timestamp: new Date().toISOString(),
     };
   }

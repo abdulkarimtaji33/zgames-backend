@@ -25,7 +25,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe());
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('ZGames API')
+    .setTitle('CGA Games API')
     .setDescription('Gaming ecommerce platform API')
     .setVersion('1.0')
     .addBearerAuth()
@@ -35,7 +35,7 @@ async function bootstrap() {
   SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
 
   await app.listen(port);
-  console.log(`ZGames API running on http://localhost:${port}/${apiPrefix}`);
+  console.log(`CGA Games API running on http://localhost:${port}/${apiPrefix}`);
   console.log(`Swagger docs at http://localhost:${port}/${apiPrefix}/docs`);
 }
 
