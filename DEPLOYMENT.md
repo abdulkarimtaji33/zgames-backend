@@ -16,6 +16,7 @@
 | **Web** | Nginx **:80/:443** on `cgagames.com`: `/` → `http://127.0.0.1:5555`, `/api/` → `http://127.0.0.1:3330` |
 | **Nginx site** | `/etc/nginx/sites-available/cgagames.com` (symlink `sites-enabled/cgagames.com`) |
 | **SSL** | Let's Encrypt via certbot, auto-renews (`certbot renew` timer). Cert covers `cgagames.com` + `www.cgagames.com`. |
+| **Database** | MariaDB, schema `cgagames` (`DB_NAME=cgagames` in backend `.env`), user `zgames`@`localhost` (kept its original username, only granted access to the new schema). Old `zgames` schema and a `mysqldump` backup (`/root/zgames_backup_*.sql`) were left in place, not dropped. |
 
 ## Git remotes (on server)
 
