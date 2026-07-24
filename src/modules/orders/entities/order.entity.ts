@@ -1,4 +1,4 @@
-import { Entity, Column, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
+import { Entity, Column, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm';
 import { AbstractEntity } from '../../../common/entities/abstract.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { OrderItem } from './order-item.entity';
@@ -86,6 +86,10 @@ export class Order extends AbstractEntity {
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   estimatedDelivery: Date | null;
+
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  idempotencyKey: string | null;
 
   @ManyToOne(() => Customer, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'customerId' })

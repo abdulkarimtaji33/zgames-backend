@@ -1,6 +1,6 @@
 ﻿import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, In, DataSource } from 'typeorm';
 import { Order, OrderStatus, PaymentStatus } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
@@ -14,8 +14,18 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationRecipientType } from '../notifications/entities/notification.entity';
 import { UsersService } from '../users/users.service';
 import { Product, ProductType } from '../products/entities/product.entity';
+import { Customer } from '../customers/entities/customer.entity';
 import { forwardRef, Inject } from '@nestjs/common';
 import { GiftCardCodesService } from '../products/gift-card-codes/gift-card-codes.service';
+
+/** MySQL/Postgres driver error codes for a unique-constraint violation, used to detect a
+ * concurrent duplicate idempotency-key insert without a separate pre-check + insert race. */
+const DUPLICATE_KEY_ERROR_CODES = new Set(['ER_DUP_ENTRY', '23505']);
+function isDuplicateKeyError(err: unknown): boolean {
+  const code = (err as { code?: string; driverError?: { code?: string } })?.code
+    ?? (err as { driverError?: { code?: string } })?.driverError?.code;
+  return typeof code === 'string' && DUPLICATE_KEY_ERROR_CODES.has(code);
+}
 
 @Injectable()
 export class OrdersService {
@@ -33,6 +43,7 @@ export class OrdersService {
     private readonly notificationsService: NotificationsService,
     private readonly usersService: UsersService,
     @Inject(forwardRef(() => GiftCardCodesService)) private readonly giftCardCodesService: GiftCardCodesService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   private generateOrderNumber(): string {
@@ -79,51 +90,99 @@ export class OrdersService {
   }
 
   async create(dto: CreateOrderDto): Promise<Order> {
-    const { items, ...rest } = dto;
+    // Idempotency: if the caller already submitted this exact checkout attempt (e.g. a retry
+    // after a failed payment-intent step), return the previously-created order instead of
+    // inserting a duplicate.
+    if (dto.idempotencyKey) {
+      const existing = await this.repo.findOne({ where: { idempotencyKey: dto.idempotencyKey } });
+      if (existing) return this.findOne(existing.id);
+    }
+
+    const { items } = dto;
     const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
     const shippingAmount = dto.shippingCost ?? 0;
-    const total = Math.max(0, subtotal + shippingAmount);
+    const requestedStoreCredit = dto.storeCreditUsed ?? 0;
 
-    const orderEntity = this.repo.create({
-      orderNumber: this.generateOrderNumber(),
-      customerId: dto.customerId ?? null,
-      status: OrderStatus.PENDING,
-      paymentStatus: PaymentStatus.PENDING,
-      subtotal,
-      shippingAmount,
-      total,
-      currency: dto.currencyCode ?? 'AED',
-      countryCode: dto.countryCode ?? 'AE',
-      shippingAddress: dto.shippingAddress as unknown as Record<string, unknown>,
-      billingAddress: (dto.billingAddress as unknown as Record<string, unknown>) ?? null,
-      couponCode: dto.couponCode ?? null,
-      customerNotes: dto.notes ?? null,
-    } as never);
-    const order = await this.repo.save(orderEntity as never) as unknown as Order;
+    let orderId: string;
+    try {
+      orderId = await this.dataSource.transaction(async (manager) => {
+        let appliedStoreCredit = 0;
 
-    const products = await this.productRepo.find({ where: { id: In(items.map((i) => i.productId)) } });
-    const productById = new Map(products.map((p) => [p.id, p]));
+        if (requestedStoreCredit > 0) {
+          if (!dto.customerId) {
+            throw new BadRequestException('Store credit can only be applied to an authenticated customer account');
+          }
+          const customer = await manager.findOne(Customer, { where: { id: dto.customerId } });
+          if (!customer) throw new NotFoundException('Customer not found');
 
-    const orderItems = items.map((item) => {
-      const product = productById.get(item.productId);
-      return this.itemRepo.create({
-        orderId: order.id,
-        productId: item.productId,
-        variantId: item.variantId ?? null,
-        productSnapshot: product
-          ? { name: product.name, sku: product.sku, type: product.type, slug: product.slug }
-          : ({} as Record<string, unknown>),
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        totalPrice: item.quantity * item.unitPrice,
-        fulfillmentStatus: product?.type === ProductType.GIFT_CARD ? 'pending' : 'not_applicable',
+          const availableCredit = Number(customer.storeCredit);
+          if (requestedStoreCredit > availableCredit) {
+            throw new BadRequestException('Insufficient store credit');
+          }
+
+          appliedStoreCredit = requestedStoreCredit;
+          await manager.update(Customer, customer.id, { storeCredit: availableCredit - appliedStoreCredit });
+        }
+
+        const total = Math.max(0, Math.max(0, subtotal + shippingAmount) - appliedStoreCredit);
+
+        const orderEntity = manager.create(Order, {
+          orderNumber: this.generateOrderNumber(),
+          customerId: dto.customerId ?? null,
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PENDING,
+          subtotal,
+          shippingAmount,
+          storeCreditUsed: appliedStoreCredit,
+          total,
+          currency: dto.currencyCode ?? 'AED',
+          countryCode: dto.countryCode ?? 'AE',
+          shippingAddress: dto.shippingAddress as unknown as Record<string, unknown>,
+          billingAddress: (dto.billingAddress as unknown as Record<string, unknown>) ?? null,
+          couponCode: dto.couponCode ?? null,
+          customerNotes: dto.notes ?? null,
+          idempotencyKey: dto.idempotencyKey ?? null,
+        } as never);
+        const order = (await manager.save(Order, orderEntity as never)) as unknown as Order;
+
+        const products = await manager.find(Product, { where: { id: In(items.map((i) => i.productId)) } });
+        const productById = new Map(products.map((p) => [p.id, p]));
+
+        const orderItems = items.map((item) => {
+          const product = productById.get(item.productId);
+          return manager.create(OrderItem, {
+            orderId: order.id,
+            productId: item.productId,
+            variantId: item.variantId ?? null,
+            productSnapshot: product
+              ? { name: product.name, sku: product.sku, type: product.type, slug: product.slug }
+              : ({} as Record<string, unknown>),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.quantity * item.unitPrice,
+            fulfillmentStatus: product?.type === ProductType.GIFT_CARD ? 'pending' : 'not_applicable',
+          });
+        });
+        await manager.save(OrderItem, orderItems);
+
+        await manager.save(
+          OrderStatusHistory,
+          manager.create(OrderStatusHistory, { orderId: order.id, status: OrderStatus.PENDING, note: 'Order placed', isCustomerVisible: true }),
+        );
+
+        return order.id;
       });
-    });
-    await this.itemRepo.save(orderItems);
+    } catch (err) {
+      // Two concurrent retries with the same idempotency key can both pass the pre-check above;
+      // the unique index is the real guard, so fall back to returning the winner's order.
+      if (dto.idempotencyKey && isDuplicateKeyError(err)) {
+        const existing = await this.repo.findOne({ where: { idempotencyKey: dto.idempotencyKey } });
+        if (existing) return this.findOne(existing.id);
+      }
+      throw err;
+    }
 
-    await this.historyRepo.save(this.historyRepo.create({ orderId: order.id, status: OrderStatus.PENDING, note: 'Order placed', isCustomerVisible: true }));
-
-    const fullOrder = await this.findOne(order.id);
+    const fullOrder = await this.findOne(orderId);
 
     // Cash-on-delivery orders are confirmed immediately (no payment webhook will ever fire for them).
     if ((dto.paymentMethod ?? '').toLowerCase() === 'cod') {

@@ -7,6 +7,7 @@ import { ProductImage } from './entities/product-image.entity';
 import { ProductSpecification } from './entities/product-specification.entity';
 import { ProductFaq } from './entities/product-faq.entity';
 import { ProductDownload } from './entities/product-download.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
 import {
   CreateProductDto, UpdateProductDto, ProductQueryDto,
   CreateProductVariantDto, UpdateProductVariantDto,
@@ -24,7 +25,57 @@ export class ProductsService {
     @InjectRepository(ProductSpecification) private readonly specRepo: Repository<ProductSpecification>,
     @InjectRepository(ProductFaq) private readonly faqRepo: Repository<ProductFaq>,
     @InjectRepository(ProductDownload) private readonly downloadRepo: Repository<ProductDownload>,
+    // Read-only join into the Inventory module: used only to aggregate available stock
+    // onto Products API responses. Inventory's own service/logic is never touched here.
+    @InjectRepository(Inventory) private readonly inventoryRepo: Repository<Inventory>,
   ) {}
+
+  /**
+   * Sums available stock (quantity - reservedQuantity, floored at 0) across all
+   * warehouses for the given product ids, grouped by productId and variantId.
+   * Returns a map of productId -> { total, byVariant: { [variantId]: qty } }.
+   */
+  private async getStockByProductIds(
+    productIds: string[],
+  ): Promise<Map<string, { total: number; byVariant: Record<string, number> }>> {
+    const result = new Map<string, { total: number; byVariant: Record<string, number> }>();
+    if (!productIds.length) return result;
+
+    const rows = await this.inventoryRepo
+      .createQueryBuilder('inv')
+      .select('inv.productId', 'productId')
+      .addSelect('inv.variantId', 'variantId')
+      .addSelect('SUM(GREATEST(inv.quantity - inv.reservedQuantity, 0))', 'stock')
+      .where('inv.productId IN (:...ids)', { ids: productIds })
+      .groupBy('inv.productId')
+      .addGroupBy('inv.variantId')
+      .getRawMany<{ productId: string; variantId: string | null; stock: string }>();
+
+    for (const row of rows) {
+      const qty = Number(row.stock) || 0;
+      let entry = result.get(row.productId);
+      if (!entry) {
+        entry = { total: 0, byVariant: {} };
+        result.set(row.productId, entry);
+      }
+      entry.total += qty;
+      if (row.variantId) entry.byVariant[row.variantId] = qty;
+    }
+    return result;
+  }
+
+  /** Attaches stockQuantity (and per-variant stockQuantity, if variants are loaded) to a product. */
+  private async attachStock<T extends Product>(p: T): Promise<T> {
+    const stock = await this.getStockByProductIds([p.id]);
+    const entry = stock.get(p.id);
+    (p as unknown as { stockQuantity: number }).stockQuantity = entry?.total ?? 0;
+    if (Array.isArray(p.variants) && p.variants.length) {
+      for (const v of p.variants) {
+        (v as unknown as { stockQuantity: number }).stockQuantity = entry?.byVariant[v.id] ?? 0;
+      }
+    }
+    return p;
+  }
 
   async findAll(query: ProductQueryDto, isStaff = false) {
     const { skip, take } = getPaginationOptions(query.page, query.limit);
@@ -57,6 +108,16 @@ export class ProductsService {
     qb.orderBy(sortField, query.sortOrder === 'ASC' ? 'ASC' : 'DESC');
 
     const [items, total] = await qb.getManyAndCount();
+
+    // Single grouped query aggregating Inventory across the current page of products,
+    // rather than N+1 lookups. Cheap enough to include on the list endpoint too.
+    if (items.length) {
+      const stockMap = await this.getStockByProductIds(items.map((i) => i.id));
+      for (const item of items) {
+        (item as unknown as { stockQuantity: number }).stockQuantity = stockMap.get(item.id)?.total ?? 0;
+      }
+    }
+
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }
 
@@ -70,7 +131,7 @@ export class ProductsService {
     });
     if (!p) throw new NotFoundException('Product not found');
     if (!isStaff && !p.isActive) throw new NotFoundException('Product not found');
-    return p;
+    return this.attachStock(p);
   }
 
   async findBySlug(slug: string, isStaff = false) {
@@ -80,7 +141,7 @@ export class ProductsService {
     });
     if (!p) throw new NotFoundException('Product not found');
     if (!isStaff && !p.isActive) throw new NotFoundException('Product not found');
-    return p;
+    return this.attachStock(p);
   }
 
   private async generateUniqueSlug(name: string, excludeId?: string): Promise<string> {

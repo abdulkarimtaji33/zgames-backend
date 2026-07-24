@@ -36,6 +36,8 @@ export class CreateOrderDto {
   @ApiPropertyOptional() @IsOptional() @IsString() shippingMethod?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) shippingCost?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() paymentMethod?: string;
+  @ApiPropertyOptional({ description: 'Client-generated key (e.g. UUID) to make checkout retries idempotent.' })
+  @IsOptional() @IsString() idempotencyKey?: string;
 }
 
 export class UpdateOrderStatusDto {

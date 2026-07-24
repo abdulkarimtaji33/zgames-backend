@@ -1,6 +1,6 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { BlogPost, BlogPostStatus } from './entities/blog-post.entity';
 import { BlogAuthor } from './entities/blog-author.entity';
 import { BlogCategory } from './entities/blog-category.entity';
@@ -43,7 +43,11 @@ export class BlogService {
   }
 
   async createPost(dto: CreateBlogPostDto) {
-    const slug = slugify(dto.title, { lower: true, strict: true });
+    const slug = dto.slug ? dto.slug : slugify(dto.title, { lower: true, strict: true });
+    if (dto.slug) {
+      const exists = await this.postRepo.findOne({ where: { slug } });
+      if (exists) throw new ConflictException('Post slug already exists');
+    }
     const post = this.postRepo.create({
       title: dto.title,
       slug,
@@ -63,7 +67,13 @@ export class BlogService {
 
   async updatePost(id: string, dto: UpdateBlogPostDto) {
     const post = await this.findPost(id);
-    if (dto.title) post.slug = slugify(dto.title, { lower: true, strict: true });
+    if (dto.slug) {
+      const exists = await this.postRepo.findOne({ where: { slug: dto.slug, id: Not(id) } });
+      if (exists) throw new ConflictException('Post slug already exists');
+      post.slug = dto.slug;
+    } else if (dto.title) {
+      post.slug = slugify(dto.title, { lower: true, strict: true });
+    }
     if (dto.title !== undefined) post.title = dto.title;
     if (dto.excerpt !== undefined) post.excerpt = dto.excerpt ?? null;
     if (dto.content !== undefined) post.content = (dto.content ?? {}) as Record<string, unknown>;

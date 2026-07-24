@@ -1,4 +1,4 @@
-﻿import { IsString, IsOptional, IsBoolean, IsUUID, IsEnum } from 'class-validator';
+﻿import { IsString, IsOptional, IsBoolean, IsUUID, IsEnum, Matches } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 export { BlogPostStatus } from '../entities/blog-post.entity';
@@ -16,6 +16,7 @@ export class CreateBlogCategoryDto {
 export class UpdateBlogCategoryDto extends PartialType(CreateBlogCategoryDto) {}
 export class CreateBlogPostDto {
   @ApiProperty() @IsString() title: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: 'slug must contain only lowercase letters, numbers, and hyphens' }) slug?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() excerpt?: string;
   @ApiPropertyOptional() @IsOptional() content?: unknown;
   @ApiPropertyOptional() @IsOptional() @IsString() coverImage?: string;

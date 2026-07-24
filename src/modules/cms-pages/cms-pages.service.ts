@@ -1,6 +1,6 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { CmsPage } from './entities/cms-page.entity';
 import { CreateCmsPageDto, UpdateCmsPageDto } from './dto/cms-page.dto';
 import slugify from 'slugify';
@@ -25,7 +25,11 @@ export class CmsPagesService {
   }
 
   async create(dto: CreateCmsPageDto) {
-    const slug = slugify(dto.title, { lower: true, strict: true });
+    const slug = dto.slug ? dto.slug : slugify(dto.title, { lower: true, strict: true });
+    if (dto.slug) {
+      const exists = await this.repo.findOne({ where: { slug } });
+      if (exists) throw new ConflictException('Page slug already exists');
+    }
     return this.repo.save(this.repo.create({
       title: dto.title,
       slug,
@@ -38,7 +42,14 @@ export class CmsPagesService {
 
   async update(id: string, dto: UpdateCmsPageDto) {
     const page = await this.findOne(id);
-    if (dto.title) { page.title = dto.title; page.slug = slugify(dto.title, { lower: true, strict: true }); }
+    if (dto.slug) {
+      const exists = await this.repo.findOne({ where: { slug: dto.slug, id: Not(id) } });
+      if (exists) throw new ConflictException('Page slug already exists');
+      page.slug = dto.slug;
+    } else if (dto.title) {
+      page.slug = slugify(dto.title, { lower: true, strict: true });
+    }
+    if (dto.title) { page.title = dto.title; }
     if (dto.content !== undefined) page.content = (dto.content ?? {}) as Record<string, unknown>;
     if (dto.metaTitle !== undefined) page.metaTitle = dto.metaTitle ?? null;
     if (dto.metaDescription !== undefined) page.metaDescription = dto.metaDescription ?? null;
