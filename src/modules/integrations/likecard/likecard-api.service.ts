@@ -7,6 +7,7 @@ import {
   LikeCardNullFieldError,
   LikeCardTimeoutError,
   classifyLikeCardFailure,
+  classifyLikeCardHttpFailure,
 } from './likecard.exceptions';
 import {
   GetOrderDetailsOptions,
@@ -123,7 +124,8 @@ export class LikeCardApiService {
     }
 
     if (!res.ok) {
-      throw new LikeCardApiError(`LikeCard ${endpoint} returned HTTP ${res.status}`, endpoint);
+      const bodySnippet = (await res.text().catch(() => '')).slice(0, 500);
+      throw classifyLikeCardHttpFailure(res.status, bodySnippet, endpoint);
     }
 
     const envelope = (await res.json()) as LikeCardEnvelope<T>;
