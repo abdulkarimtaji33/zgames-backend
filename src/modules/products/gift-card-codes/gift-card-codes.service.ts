@@ -132,10 +132,10 @@ export class GiftCardCodesService {
           break;
         }
 
-        const costPrice = liveProduct.costPrice ?? liveProduct.price;
+        const costPrice = liveProduct.productPrice;
         this.likeCardService.assertPricingIsSafe(Number(variant.price), costPrice);
 
-        if (balance.balance < costPrice) {
+        if (Number(balance.balance) < costPrice) {
           this.logger.error(`LikeCard balance (${balance.balance}) too low to cover cost ${costPrice} for product ${likecardProductId} — ALERT: low balance`);
           break;
         }

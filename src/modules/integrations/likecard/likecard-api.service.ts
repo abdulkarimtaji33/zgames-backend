@@ -130,12 +130,25 @@ export class LikeCardApiService {
 
     const envelope = (await res.json()) as LikeCardEnvelope<T>;
     if (envelope.response !== 1) {
-      throw classifyLikeCardFailure(envelope.message ?? 'Unknown LikeCard error', endpoint);
+      throw classifyLikeCardFailure((envelope.message as string) ?? 'Unknown LikeCard error', endpoint);
     }
-    if (envelope.data && typeof envelope.data === 'object') {
-      this.assertNoNulls(envelope.data as Record<string, unknown>, endpoint);
+
+    // Not every endpoint wraps its payload in a `data` field despite the docs' generic envelope
+    // description — e.g. check_balance returns {response, userId, balance, currency} flat, while
+    // categories/products/orders do use {response, data: [...]}. Fall back to the envelope itself
+    // (minus the two envelope-only keys) when `data` is absent.
+    let payload: unknown;
+    if (envelope.data !== undefined) {
+      payload = envelope.data;
+    } else {
+      const { response: _response, message: _message, ...rest } = envelope;
+      payload = rest;
     }
-    return envelope.data as T;
+
+    if (payload && typeof payload === 'object') {
+      this.assertNoNulls(payload as Record<string, unknown>, endpoint);
+    }
+    return payload as T;
   }
 
   async checkBalance(): Promise<LikeCardBalance> {

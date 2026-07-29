@@ -6,24 +6,28 @@ import slugify from 'slugify';
 import { LikeCardApiService } from './likecard-api.service';
 import { Product, ProductRegion, ProductType, ProductPlatform } from '../../products/entities/product.entity';
 import { ProductVariant } from '../../products/entities/product-variant.entity';
+import { ProductImage } from '../../products/entities/product-image.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { LikeCardCategory, LikeCardProduct } from './likecard.types';
 import { LikeCardApiError } from './likecard.exceptions';
 
-const REGION_NAME_MAP: Record<string, ProductRegion> = {
-  'saudi arabia': ProductRegion.KSA,
-  ksa: ProductRegion.KSA,
-  'united arab emirates': ProductRegion.UAE,
-  uae: ProductRegion.UAE,
-  oman: ProductRegion.OMAN,
-  kuwait: ProductRegion.KUWAIT,
-  qatar: ProductRegion.QATAR,
-  bahrain: ProductRegion.BAHRAIN,
-};
+// LikeCard's real PlayStation sub-category names are formatted like "PSN - UAE", "PSN - Saudi
+// Arabia", etc. (confirmed live) — match by keyword contained in the name, not exact equality.
+const REGION_KEYWORDS: Array<{ keywords: string[]; region: ProductRegion }> = [
+  { keywords: ['saudi arabia', 'ksa'], region: ProductRegion.KSA },
+  { keywords: ['uae', 'united arab emirates'], region: ProductRegion.UAE },
+  { keywords: ['oman'], region: ProductRegion.OMAN },
+  { keywords: ['kuwait'], region: ProductRegion.KUWAIT },
+  { keywords: ['qatar'], region: ProductRegion.QATAR },
+  { keywords: ['bahrain'], region: ProductRegion.BAHRAIN },
+];
 
 function matchRegion(categoryName: string): ProductRegion | null {
-  const key = categoryName.trim().toLowerCase();
-  return REGION_NAME_MAP[key] ?? null;
+  const lower = categoryName.trim().toLowerCase();
+  for (const { keywords, region } of REGION_KEYWORDS) {
+    if (keywords.some((kw) => lower.includes(kw))) return region;
+  }
+  return null;
 }
 
 export interface CatalogSyncResult {
@@ -54,6 +58,7 @@ export class LikeCardService {
     private readonly config: ConfigService,
     @InjectRepository(Product) private readonly productRepo: Repository<Product>,
     @InjectRepository(ProductVariant) private readonly variantRepo: Repository<ProductVariant>,
+    @InjectRepository(ProductImage) private readonly imageRepo: Repository<ProductImage>,
     @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
   ) {}
 
@@ -112,11 +117,11 @@ export class LikeCardService {
   /** Finds the "PlayStation" node in LikeCard's category tree and its direct region sub-categories. */
   private findPlaystationRegionCategories(categories: LikeCardCategory[]): LikeCardCategory[] {
     const flatten = (nodes: LikeCardCategory[]): LikeCardCategory[] =>
-      nodes.flatMap((n) => [n, ...(n.children ? flatten(n.children) : [])]);
+      nodes.flatMap((n) => [n, ...(n.childs ? flatten(n.childs) : [])]);
     const all = flatten(categories);
-    const playstation = all.find((c) => c.name.trim().toLowerCase().includes('playstation'));
+    const playstation = all.find((c) => c.categoryName.trim().toLowerCase() === 'playstation');
     if (!playstation) return [];
-    return playstation.children ?? [];
+    return playstation.childs ?? [];
   }
 
   /**
@@ -140,16 +145,20 @@ export class LikeCardService {
     };
 
     for (const cat of regionCategories) {
-      const region = matchRegion(cat.name);
+      const region = matchRegion(cat.categoryName);
       if (!region) {
-        result.skippedNoRegionMatch.push(cat.name);
-        this.logger.warn(`LikeCard PlayStation sub-category "${cat.name}" (id=${cat.id}) did not match a known ProductRegion — skipped`);
+        result.skippedNoRegionMatch.push(cat.categoryName);
+        this.logger.warn(`LikeCard PlayStation sub-category "${cat.categoryName}" (id=${cat.id}) did not match a known ProductRegion — skipped`);
         continue;
       }
-      result.regionsFound.push({ categoryId: cat.id, categoryName: cat.name, region });
+      result.regionsFound.push({ categoryId: cat.id, categoryName: cat.categoryName, region });
 
       const products = await this.api.getProductsByCategory(cat.id);
       for (const lcProduct of products) {
+        if (lcProduct.productName?.toLowerCase().includes('demo')) {
+          this.logger.log(`Skipping LikeCard demo product "${lcProduct.productName}" (id=${lcProduct.productId})`);
+          continue;
+        }
         const created = await this.upsertProductFromLikeCard(lcProduct, region, markupPercentOverride);
         if (created) result.productsCreated++;
         else result.productsUpdated++;
@@ -159,22 +168,31 @@ export class LikeCardService {
     return result;
   }
 
+  /** Extracts the denomination portion of a LikeCard product name (e.g. "USD 50") for our own display name. */
+  private extractDenomination(productName: string): string {
+    const match = productName.match(/(?:USD|AED|SAR|KWD|OMR|BHD|QAR)\s*\d+(\.\d+)?/i);
+    return match ? match[0] : productName.replace(/likecard|like4card/gi, '').trim();
+  }
+
   /** Returns true if a new Product was created, false if an existing one was updated. */
   private async upsertProductFromLikeCard(
     lcProduct: LikeCardProduct,
     region: ProductRegion,
     markupPercentOverride?: number,
   ): Promise<boolean> {
-    const existingVariant = await this.variantRepo.findOne({ where: { likecardProductId: lcProduct.id } });
-    const price = this.applyMarkup(lcProduct.costPrice ?? lcProduct.price, markupPercentOverride);
+    const existingVariant = await this.variantRepo.findOne({ where: { likecardProductId: lcProduct.productId } });
+    const price = this.applyMarkup(lcProduct.productPrice, markupPercentOverride);
+    const isActive = lcProduct.available !== false;
 
     if (existingVariant) {
       existingVariant.price = price;
+      existingVariant.isActive = isActive;
       await this.variantRepo.save(existingVariant);
       const product = await this.productRepo.findOne({ where: { id: existingVariant.productId } });
       if (product) {
         product.price = price;
-        if (lcProduct.costPrice !== undefined) product.costPrice = lcProduct.costPrice;
+        product.costPrice = lcProduct.productPrice;
+        product.isActive = isActive;
         await this.productRepo.save(product);
       }
       return false;
@@ -182,8 +200,8 @@ export class LikeCardService {
 
     // Customer-facing name/description are written fresh here — never copy LikeCard's own
     // product name/branding verbatim, since it may reference the wholesale supplier.
-    const displayName = `PlayStation Store Gift Card — ${this.regionLabel(region)} — ${lcProduct.name.replace(/likecard|like4card/gi, '').trim()}`.trim();
-    const sku = `LC-PSN-${lcProduct.id}`;
+    const displayName = `PlayStation Store Gift Card — ${this.regionLabel(region)} — ${this.extractDenomination(lcProduct.productName)}`.trim();
+    const sku = `LC-PSN-${lcProduct.productId}`;
     const slug = await this.generateUniqueSlug(displayName);
     const categoryId = await this.getOrCreateGiftCardsCategory();
 
@@ -196,19 +214,34 @@ export class LikeCardService {
       region,
       categoryId,
       price,
-      costPrice: lcProduct.costPrice ?? null,
-      isActive: true,
+      costPrice: lcProduct.productPrice,
+      isActive,
       shortDescription: `Digital PlayStation Store gift card for the ${this.regionLabel(region)} store.`,
     });
     await this.productRepo.save(product);
+
+    // Prefer the branding-free "white label" image variant LikeCard provides — never surface
+    // their own (possibly branded) product image to customers.
+    const imageUrl = lcProduct.productImageWhiteLabel || lcProduct.productImage;
+    if (imageUrl) {
+      await this.imageRepo.save(
+        this.imageRepo.create({
+          productId: product.id,
+          url: imageUrl,
+          altText: displayName,
+          isFeatured: true,
+          sortOrder: 0,
+        }),
+      );
+    }
 
     const variant = this.variantRepo.create({
       productId: product.id,
       sku: `${sku}-DEFAULT`,
       price,
       options: [],
-      isActive: true,
-      likecardProductId: lcProduct.id,
+      isActive,
+      likecardProductId: lcProduct.productId,
     });
     await this.variantRepo.save(variant);
 
@@ -263,7 +296,7 @@ export class LikeCardService {
    */
   async getLiveProduct(likecardProductId: string): Promise<LikeCardProduct | null> {
     const products = await this.api.getProductsByIds([likecardProductId]);
-    return products.find((p) => p.id === likecardProductId) ?? null;
+    return products.find((p) => p.productId === likecardProductId) ?? null;
   }
 
   /**
