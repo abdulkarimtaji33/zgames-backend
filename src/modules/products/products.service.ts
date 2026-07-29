@@ -94,13 +94,16 @@ export class ProductsService {
     if (query.isPreorder !== undefined) qb.andWhere('p.isPreorder = :pre', { pre: query.isPreorder });
     if (query.isComingSoon !== undefined) qb.andWhere('p.isComingSoon = :cs', { cs: query.isComingSoon });
     if (query.brandId) qb.andWhere('p.brandId = :bid', { bid: query.brandId });
-    if (query.platform) qb.andWhere('p.platform = :plat', { plat: query.platform });
-    if (query.region) qb.andWhere('p.region = :reg', { reg: query.region });
-    if (query.genre) qb.andWhere('p.genre = :gen', { gen: query.genre });
+    if (query.platform?.length) qb.andWhere('p.platform IN (:...plat)', { plat: query.platform });
+    if (query.region?.length) qb.andWhere('p.region IN (:...reg)', { reg: query.region });
+    if (query.genre?.length) qb.andWhere('p.genre IN (:...gen)', { gen: query.genre });
     if (query.minPrice !== undefined) qb.andWhere('p.price >= :min', { min: query.minPrice });
     if (query.maxPrice !== undefined) qb.andWhere('p.price <= :max', { max: query.maxPrice });
     if (query.categoryId) {
       qb.andWhere('p.categoryId = :cid', { cid: query.categoryId });
+    }
+    if (query.inStock) {
+      qb.andWhere(`EXISTS (SELECT 1 FROM inventory inv WHERE inv.productId = p.id AND (inv.quantity - inv.reservedQuantity) > 0)`);
     }
 
     const sortField = ['price', 'name', 'createdAt', 'avgRating', 'reviewCount'].includes(query.sortBy ?? '')

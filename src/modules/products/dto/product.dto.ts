@@ -53,13 +53,26 @@ export class ProductQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() categoryId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() brandId?: string;
-  @ApiPropertyOptional() @IsOptional() @IsEnum(ProductPlatform) platform?: ProductPlatform;
-  @ApiPropertyOptional() @IsOptional() @IsEnum(ProductRegion) region?: ProductRegion;
-  @ApiPropertyOptional() @IsOptional() @IsEnum(ProductGenre) genre?: ProductGenre;
+  @ApiPropertyOptional({ enum: ProductPlatform, isArray: true })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined ? value : Array.isArray(value) ? value : [value]))
+  @IsEnum(ProductPlatform, { each: true })
+  platform?: ProductPlatform[];
+  @ApiPropertyOptional({ enum: ProductRegion, isArray: true })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined ? value : Array.isArray(value) ? value : [value]))
+  @IsEnum(ProductRegion, { each: true })
+  region?: ProductRegion[];
+  @ApiPropertyOptional({ enum: ProductGenre, isArray: true })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined ? value : Array.isArray(value) ? value : [value]))
+  @IsEnum(ProductGenre, { each: true })
+  genre?: ProductGenre[];
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isActive?: boolean;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isFeatured?: boolean;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isPreorder?: boolean;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isComingSoon?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() inStock?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) minPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) maxPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() sortBy?: string;
