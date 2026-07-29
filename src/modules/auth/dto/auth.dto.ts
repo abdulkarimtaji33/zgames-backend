@@ -2,10 +2,17 @@ import {
   IsEmail,
   IsString,
   MinLength,
+  MaxLength,
+  Matches,
   IsNotEmpty,
   IsOptional,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+// Requires at least one letter and one number — a minimum bar against trivially weak passwords
+// like "11111111" or "password" while not being so strict it blocks reasonable passphrases.
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d).+$/;
+const PASSWORD_MESSAGE = 'Password must contain at least one letter and one number';
 
 export class LoginDto {
   @ApiProperty({ example: 'user@example.com' })
@@ -26,6 +33,8 @@ export class RegisterCustomerDto {
   @ApiProperty()
   @IsString()
   @MinLength(8)
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password: string;
 
   @ApiProperty()
@@ -59,6 +68,8 @@ export class ResetPasswordDto {
   @ApiProperty()
   @IsString()
   @MinLength(8)
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password: string;
 }
 
@@ -67,6 +78,13 @@ export class RefreshTokenDto {
   @IsString()
   @IsNotEmpty()
   refreshToken: string;
+}
+
+export class OAuthExchangeDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  code: string;
 }
 
 export class VerifyEmailDto {

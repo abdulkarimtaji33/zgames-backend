@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { validationSchema } from './config/validation.schema';
@@ -51,6 +53,10 @@ import { SettingsModule } from './modules/settings/settings.module';
       validationSchema,
       envFilePath: ['.env.development', '.env'],
     }),
+    // Global default: 100 requests / minute per IP. Auth endpoints apply their own tighter
+    // @Throttle(...) overrides (see auth.controller.ts) since brute-force/credential-stuffing
+    // and email-enumeration are the highest-value targets to slow down.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     DatabaseModule,
     AppGraphqlModule,
     StorageModule,
@@ -92,5 +98,6 @@ import { SettingsModule } from './modules/settings/settings.module';
     SettingsModule,
   ],
   controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationRecipientType } from '../notifications/entities/notification.entity';
 import { UsersService } from '../users/users.service';
 import { Product, ProductType } from '../products/entities/product.entity';
+import { ProductVariant } from '../products/entities/product-variant.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { forwardRef, Inject } from '@nestjs/common';
 import { GiftCardCodesService } from '../products/gift-card-codes/gift-card-codes.service';
@@ -77,9 +78,27 @@ export class OrdersService {
     return order;
   }
 
-  async findByOrderNumber(orderNumber: string) {
-    const order = await this.repo.findOne({ where: { orderNumber }, relations: { items: true, shipments: { trackingHistory: true } } });
+  /**
+   * Guest-facing order lookup — must verify the caller actually knows the order's contact email,
+   * not just a guessable/enumerable order number, or any authenticated account could pull any
+   * other customer's full order (address, items, total) via this route.
+   */
+  async findByOrderNumber(orderNumber: string, email?: string) {
+    const order = await this.repo.findOne({
+      where: { orderNumber },
+      relations: { items: true, shipments: { trackingHistory: true }, customer: true },
+    });
     if (!order) throw new NotFoundException('Order not found');
+
+    const ownerEmail = order.customer?.email;
+    if (ownerEmail) {
+      if (!email || ownerEmail.toLowerCase() !== email.trim().toLowerCase()) {
+        throw new NotFoundException('Order not found');
+      }
+    }
+    // Guest (no linked customer) orders currently have no stored contact email to verify against
+    // — the checkout flow never captures one for guest checkout. Tracked as a follow-up; until
+    // then, a guest order can only be looked up by its (unguessable-in-practice) order number.
     return order;
   }
 
@@ -99,13 +118,39 @@ export class OrdersService {
     }
 
     const { items } = dto;
-    const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
     const shippingAmount = dto.shippingCost ?? 0;
     const requestedStoreCredit = dto.storeCreditUsed ?? 0;
 
     let orderId: string;
     try {
       orderId = await this.dataSource.transaction(async (manager) => {
+        // Price is always recomputed server-side from the current DB price — the client-submitted
+        // unitPrice is never trusted, since accepting it verbatim would let a customer pay whatever
+        // amount they choose for a real product by editing the request body.
+        const products = await manager.find(Product, { where: { id: In(items.map((i) => i.productId)) } });
+        const productById = new Map(products.map((p) => [p.id, p]));
+        const variantIds = items.map((i) => i.variantId).filter((id): id is string => Boolean(id));
+        const variants = variantIds.length
+          ? await manager.find(ProductVariant, { where: { id: In(variantIds) } })
+          : [];
+        const variantById = new Map(variants.map((v) => [v.id, v]));
+
+        const pricedItems = items.map((item) => {
+          const product = productById.get(item.productId);
+          if (!product || !product.isActive) {
+            throw new BadRequestException(`Product ${item.productId} is not available`);
+          }
+          const variant = item.variantId ? variantById.get(item.variantId) : undefined;
+          if (item.variantId && (!variant || !variant.isActive)) {
+            throw new BadRequestException(`Product variant ${item.variantId} is not available`);
+          }
+          const priceSource = variant ?? product;
+          const unitPrice = priceSource.salePrice != null ? Number(priceSource.salePrice) : Number(priceSource.price);
+          return { ...item, product, unitPrice };
+        });
+
+        const subtotal = pricedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+
         let appliedStoreCredit = 0;
 
         if (requestedStoreCredit > 0) {
@@ -145,22 +190,17 @@ export class OrdersService {
         } as never);
         const order = (await manager.save(Order, orderEntity as never)) as unknown as Order;
 
-        const products = await manager.find(Product, { where: { id: In(items.map((i) => i.productId)) } });
-        const productById = new Map(products.map((p) => [p.id, p]));
-
-        const orderItems = items.map((item) => {
-          const product = productById.get(item.productId);
+        const orderItems = pricedItems.map((item) => {
+          const { product } = item;
           return manager.create(OrderItem, {
             orderId: order.id,
             productId: item.productId,
             variantId: item.variantId ?? null,
-            productSnapshot: product
-              ? { name: product.name, sku: product.sku, type: product.type, slug: product.slug }
-              : ({} as Record<string, unknown>),
+            productSnapshot: { name: product.name, sku: product.sku, type: product.type, slug: product.slug },
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             totalPrice: item.quantity * item.unitPrice,
-            fulfillmentStatus: product?.type === ProductType.GIFT_CARD ? 'pending' : 'not_applicable',
+            fulfillmentStatus: product.type === ProductType.GIFT_CARD ? 'pending' : 'not_applicable',
           });
         });
         await manager.save(OrderItem, orderItems);
@@ -294,7 +334,32 @@ export class OrdersService {
           ));
         }
       } catch (err) {
-        this.logger.error(`Failed to fulfill gift card codes for order ${order.orderNumber}: ${err}`);
+        // An unexpected throw here (not a returned shortfall) previously left the item silently
+        // stuck with no admin alert and no reconciliation trail — the customer was charged with
+        // no code delivered and no visible signal anything went wrong. Treat it the same as a
+        // full shortfall: mark it, alert admins via the existing channel, don't just log it.
+        this.logger.error(`Failed to fulfill gift card codes for order ${order.orderNumber}, item ${item.id}: ${err}`);
+        const productName = (item.productSnapshot as { name?: string })?.name ?? 'Gift Card';
+        try {
+          await this.itemRepo.update(item.id, { fulfillmentStatus: 'pending' });
+          const adminEmail = (await this.settingsService.getTyped<string>('admin_notification_email')) || process.env.ADMIN_NOTIFICATION_EMAIL;
+          if (adminEmail) {
+            await this.mailService.sendGiftCardShortfallAlert(adminEmail, order.orderNumber, productName, item.quantity).catch(() => {});
+          }
+          const admins = await this.usersService.findAdmins();
+          await Promise.all(admins.map((admin) =>
+            this.notificationsService.createNotification(
+              admin.id,
+              NotificationRecipientType.USER,
+              'gift_card_shortfall',
+              `Gift card fulfillment failed — order #${order.orderNumber}`,
+              `An unexpected error occurred fulfilling "${productName}" (${item.quantity} unit(s)). Please fulfill manually and investigate.`,
+              { orderId: order.id, orderItemId: item.id },
+            ),
+          ));
+        } catch (alertErr) {
+          this.logger.error(`Also failed to send the fulfillment-failure alert for order ${order.orderNumber}, item ${item.id}: ${alertErr}`);
+        }
       }
     }
   }

@@ -10,6 +10,7 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { OAuthProvider } from './entities/oauth-provider.entity';
+import { OAuthExchangeCode } from './entities/oauth-exchange-code.entity';
 import { User } from '../users/entities/user.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { Role } from '../roles/entities/role.entity';
@@ -23,12 +24,13 @@ import { Permission } from '../permissions/entities/permission.entity';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService): JwtModuleOptions => ({
-        secret: config.get<string>('jwt.secret') ?? 'change-me',
+        secret: config.get<string>('jwt.secret')!,
       }),
     }),
     TypeOrmModule.forFeature([
       RefreshToken,
       OAuthProvider,
+      OAuthExchangeCode,
       User,
       Customer,
       Role,

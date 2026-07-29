@@ -15,7 +15,9 @@ export class ReturnsController {
   constructor(private readonly svc: ReturnsService) {}
   @UseGuards(RolesGuard) @Roles('super_admin', 'admin', 'customer_support')
   @Get() findAll(@Query() q: ReturnQueryDto) { return this.svc.findAll(q); }
-  @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
+  @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: { id: string; roles?: Array<{ name: string } | string> }) {
+    return this.svc.findOne(id, user);
+  }
   @Post() create(@CurrentUser() user: { id: string }, @Body() dto: CreateReturnDto) { return this.svc.create(user.id, dto); }
   @UseGuards(RolesGuard) @Roles('super_admin', 'admin', 'customer_support')
   @Patch(':id') update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateReturnDto) { return this.svc.update(id, dto); }

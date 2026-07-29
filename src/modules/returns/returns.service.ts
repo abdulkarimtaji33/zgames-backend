@@ -6,6 +6,15 @@ import { ReturnItem } from './entities/return-item.entity';
 import { CreateReturnDto, UpdateReturnDto, ReturnQueryDto } from './dto/return.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
 
+export interface RequestingUser {
+  id: string;
+  roles?: Array<{ name: string } | string>;
+}
+
+function isStaff(user?: RequestingUser): boolean {
+  return Array.isArray(user?.roles) && user.roles.length > 0;
+}
+
 @Injectable()
 export class ReturnsService {
   constructor(
@@ -23,9 +32,14 @@ export class ReturnsService {
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }
 
-  async findOne(id: string) {
+  /** `requester` is omitted for internal/staff-guarded call sites; pass it for any customer-reachable route so ownership is enforced. */
+  async findOne(id: string, requester?: RequestingUser) {
     const r = await this.repo.findOne({ where: { id }, relations: { items: true } });
     if (!r) throw new NotFoundException('Return not found');
+    if (requester && !isStaff(requester) && r.customerId !== requester.id) {
+      // 404 rather than 403 — don't confirm to a non-owner that this id exists at all.
+      throw new NotFoundException('Return not found');
+    }
     return r;
   }
 

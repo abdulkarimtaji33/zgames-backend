@@ -10,7 +10,10 @@ export default () => ({
     name: process.env.DB_NAME ?? 'cgagames',
   },
   jwt: {
-    secret: process.env.JWT_SECRET ?? 'change-me-in-production',
+    // Joi validation (validation.schema.ts) requires JWT_SECRET in production and boots the app
+    // if it's missing there — this fallback only ever applies in dev/test, matching Joi's own
+    // dev-only default, since Joi's default() doesn't mutate process.env for this factory to read.
+    secret: process.env.JWT_SECRET ?? 'dev-only-insecure-default-do-not-use-in-production',
     expiresIn: process.env.JWT_EXPIRES_IN ?? '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
   },

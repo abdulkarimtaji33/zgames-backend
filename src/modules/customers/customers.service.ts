@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import {
   UpdateCustomerProfileDto,
   CreateAddressDto,
@@ -28,6 +29,8 @@ export class CustomersService {
     private readonly customerRepo: Repository<Customer>,
     @InjectRepository(CustomerAddress)
     private readonly addressRepo: Repository<CustomerAddress>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepo: Repository<RefreshToken>,
   ) {}
 
   async findAll(query: CustomerQueryDto): Promise<PaginatedResult<Customer>> {
@@ -80,6 +83,8 @@ export class CustomersService {
 
     customer.password = dto.newPassword;
     await this.customerRepo.save(customer);
+    // A refresh token issued before this change (e.g. one that leaked) must not remain valid.
+    await this.refreshTokenRepo.update({ customerId: id, isRevoked: false }, { isRevoked: true });
   }
 
   async setActive(id: string, isActive: boolean): Promise<Customer> {

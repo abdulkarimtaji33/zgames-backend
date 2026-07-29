@@ -209,7 +209,10 @@ export class LikeCardService {
       name: displayName,
       slug,
       sku,
-      type: ProductType.DIGITAL,
+      // Must be GIFT_CARD, not DIGITAL: order fulfillment (orders.service.ts fulfillGiftCards)
+      // only processes items whose snapshotted type === ProductType.GIFT_CARD — tagging these
+      // DIGITAL would mean paid orders silently never receive a code.
+      type: ProductType.GIFT_CARD,
       // PSN wallet credit works on any PlayStation hardware (PS4/PS5 alike) — never tag as PS5
       // specifically, or it wrongly floods PS5-hardware-only storefront rails/filters.
       platform: ProductPlatform.MULTI,
@@ -274,7 +277,7 @@ export class LikeCardService {
     const unlinked = await this.variantRepo
       .createQueryBuilder('v')
       .innerJoin(Product, 'p', 'p.id = v.productId')
-      .where('p.type = :type', { type: ProductType.DIGITAL })
+      .where('p.type = :type', { type: ProductType.GIFT_CARD })
       .andWhere('v.likecardProductId IS NULL')
       .select(['v.id AS variantId', 'v.productId AS productId', 'p.name AS name'])
       .getRawMany();

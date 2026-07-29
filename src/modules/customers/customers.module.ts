@@ -4,9 +4,10 @@ import { CustomersService } from './customers.service';
 import { CustomersController } from './customers.controller';
 import { Customer } from './entities/customer.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Customer, CustomerAddress])],
+  imports: [TypeOrmModule.forFeature([Customer, CustomerAddress, RefreshToken])],
   providers: [CustomersService],
   controllers: [CustomersController],
   exports: [CustomersService],

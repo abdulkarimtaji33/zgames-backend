@@ -6,11 +6,16 @@ import {
   IsEnum,
   IsDateString,
   MinLength,
+  MaxLength,
+  Matches,
   IsUUID,
   IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { CustomerGender } from '../entities/customer.entity';
+
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d).+$/;
+const PASSWORD_MESSAGE = 'Password must contain at least one letter and one number';
 
 export class UpdateCustomerProfileDto {
   @ApiPropertyOptional()
@@ -117,6 +122,8 @@ export class ChangeCustomerPasswordDto {
   @ApiProperty()
   @IsString()
   @MinLength(8)
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   newPassword: string;
 }
 

@@ -11,6 +11,7 @@ import {
   Ip,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -22,8 +23,11 @@ import {
   ResetPasswordDto,
   VerifyEmailDto,
   AuthResponseDto,
+  OAuthExchangeDto,
 } from './dto/auth.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OAuthProviderType } from './entities/oauth-provider.entity';
 import { GoogleProfile } from './strategies/google.strategy';
 
@@ -33,6 +37,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @Post('customer/register')
   @ApiOperation({ summary: 'Register a new customer' })
   async registerCustomer(
@@ -48,6 +53,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @Post('customer/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login as a customer' })
@@ -68,6 +74,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @Post('admin/login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login as admin/staff user' })
@@ -96,11 +103,13 @@ export class AuthController {
   }
 
   @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Logout (revoke refresh token)' })
-  async logout(@Body() dto: RefreshTokenDto): Promise<void> {
-    return this.authService.logout(dto.refreshToken);
+  async logout(@Body() dto: RefreshTokenDto, @CurrentUser() user: { id: string; roles?: unknown }): Promise<void> {
+    const type: 'user' | 'customer' = Array.isArray(user.roles) ? 'user' : 'customer';
+    return this.authService.logout(dto.refreshToken, { id: user.id, type });
   }
 
   @Public()
@@ -113,6 +122,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email' })
@@ -162,10 +172,9 @@ export class AuthController {
       req.headers['user-agent'],
     );
 
+    const code = await this.authService.createOAuthExchangeCode(tokens);
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-    res.redirect(
-      `${frontendUrl}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`,
-    );
+    res.redirect(`${frontendUrl}/auth/callback?code=${code}`);
   }
 
   @Public()
@@ -200,9 +209,16 @@ export class AuthController {
       req.headers['user-agent'],
     );
 
+    const code = await this.authService.createOAuthExchangeCode(tokens);
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-    res.redirect(
-      `${frontendUrl}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`,
-    );
+    res.redirect(`${frontendUrl}/auth/callback?code=${code}`);
+  }
+
+  @Public()
+  @Post('oauth/exchange')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange a short-lived OAuth redirect code for real tokens' })
+  async exchangeOAuthCode(@Body() dto: OAuthExchangeDto): Promise<AuthResponseDto> {
+    return this.authService.exchangeOAuthCode(dto.code);
   }
 }

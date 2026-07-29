@@ -5,6 +5,16 @@ import { SupportTicket, TicketStatus, TicketPriority } from './entities/support-
 import { SupportMessage, SenderType } from './entities/support-message.entity';
 import { CreateTicketDto, UpdateTicketDto, AddMessageDto, TicketQueryDto } from './dto/support-ticket.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
+import { ForbiddenException } from '@nestjs/common';
+
+export interface RequestingUser {
+  id: string;
+  roles?: Array<{ name: string } | string>;
+}
+
+function isStaff(user?: RequestingUser): boolean {
+  return Array.isArray(user?.roles) && user.roles.length > 0;
+}
 
 @Injectable()
 export class SupportTicketsService {
@@ -23,9 +33,14 @@ export class SupportTicketsService {
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }
 
-  async findOne(id: string) {
+  /** `requester` is omitted for internal/staff-guarded call sites; pass it for any customer-reachable route so ownership is enforced. */
+  async findOne(id: string, requester?: RequestingUser) {
     const t = await this.repo.findOne({ where: { id }, relations: { messages: true } });
     if (!t) throw new NotFoundException('Ticket not found');
+    if (requester && !isStaff(requester) && t.customerId !== requester.id) {
+      // 404 rather than 403 — don't confirm to a non-owner that this id exists at all.
+      throw new NotFoundException('Ticket not found');
+    }
     return t;
   }
 
@@ -57,7 +72,10 @@ export class SupportTicketsService {
   }
 
   async addMessage(id: string, senderId: string, senderType: 'customer' | 'agent', dto: AddMessageDto) {
-    await this.findOne(id);
+    const ticket = await this.findOne(id);
+    if (senderType === 'customer' && ticket.customerId !== senderId) {
+      throw new ForbiddenException('You do not have access to this ticket');
+    }
     const st = senderType === 'agent' ? SenderType.ADMIN : SenderType.CUSTOMER;
     const msg = await this.msgRepo.save(this.msgRepo.create({ ticketId: id, senderId, senderType: st, body: dto.message }));
     if (senderType === 'agent') await this.repo.update(id, { status: TicketStatus.IN_PROGRESS } as never);

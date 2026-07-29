@@ -9,12 +9,15 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { Role } from '../roles/entities/role.entity';
 import { Permission } from '../permissions/entities/permission.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { RefreshToken, TokenOwnerType } from './entities/refresh-token.entity';
 import { OAuthProvider, OAuthProviderType, OAuthOwnerType } from './entities/oauth-provider.entity';
+import { OAuthExchangeCode } from './entities/oauth-exchange-code.entity';
+import { LessThan } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { LoginDto, RegisterCustomerDto, AuthResponseDto } from './dto/auth.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
@@ -34,6 +37,8 @@ export class AuthService {
     private readonly refreshTokenRepo: Repository<RefreshToken>,
     @InjectRepository(OAuthProvider)
     private readonly oauthProviderRepo: Repository<OAuthProvider>,
+    @InjectRepository(OAuthExchangeCode)
+    private readonly oauthExchangeCodeRepo: Repository<OAuthExchangeCode>,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly mailService: MailService,
@@ -134,8 +139,11 @@ export class AuthService {
       await this.roleRepo.save(superAdminRole);
     }
 
+    // Randomly generated per-call rather than a hardcoded literal — a fixed, source-visible
+    // password would let anyone who reads this file log in as super_admin on any deployment
+    // where this public (though count()===0-gated) endpoint gets called, e.g. after a DB wipe.
     const email = 'admin@cgagames.com';
-    const password = 'Admin@123456';
+    const password = `${randomBytes(12).toString('base64url')}Aa1!`;
 
     const admin = this.userRepo.create({
       email,
@@ -207,9 +215,27 @@ export class AuthService {
     throw new UnauthorizedException();
   }
 
-  async logout(rawToken: string): Promise<void> {
+  /** `requester` scopes revocation to the caller's own token — without it, anyone who knows any
+   * valid-looking refresh token string could revoke another user's session with zero auth. */
+  async logout(rawToken: string, requester?: { id: string; type: 'user' | 'customer' }): Promise<void> {
+    if (!requester) {
+      await this.refreshTokenRepo.update({ token: rawToken }, { isRevoked: true });
+      return;
+    }
+    const tokenEntity = await this.refreshTokenRepo.findOne({ where: { token: rawToken } });
+    if (!tokenEntity) return;
+    const owns =
+      (requester.type === 'user' && tokenEntity.ownerType === TokenOwnerType.USER && tokenEntity.userId === requester.id) ||
+      (requester.type === 'customer' && tokenEntity.ownerType === TokenOwnerType.CUSTOMER && tokenEntity.customerId === requester.id);
+    if (!owns) return;
+    await this.refreshTokenRepo.update(tokenEntity.id, { isRevoked: true });
+  }
+
+  /** Revokes every active refresh token for a customer — called after a password reset/change so a
+   * previously-stolen refresh token can't keep minting new access tokens past the reset. */
+  async revokeAllCustomerRefreshTokens(customerId: string): Promise<void> {
     await this.refreshTokenRepo.update(
-      { token: rawToken },
+      { customerId, isRevoked: false },
       { isRevoked: true },
     );
   }
@@ -266,6 +292,9 @@ export class AuthService {
       passwordResetToken: null,
       passwordResetExpires: null,
     });
+    // A refresh token issued before this reset (e.g. one that leaked) must not remain valid after
+    // the customer has deliberately changed their password.
+    await this.revokeAllCustomerRefreshTokens(customer.id);
   }
 
   async handleOAuthCallback(
@@ -325,6 +354,38 @@ export class AuthService {
 
     await this.customerRepo.update(customer.id, { lastLoginAt: new Date() });
     return this.generateTokens(customer, 'customer', ipAddress, userAgent);
+  }
+
+  /**
+   * Stores the real tokens server-side and returns a short-lived, single-use opaque code to put
+   * in the OAuth redirect URL instead — putting the actual access/refresh tokens in a URL query
+   * string leaks them via browser history, Referer headers, and reverse-proxy/CDN access logs.
+   */
+  async createOAuthExchangeCode(tokens: AuthResponseDto): Promise<string> {
+    const code = uuidv4();
+    await this.oauthExchangeCodeRepo.save(
+      this.oauthExchangeCodeRepo.create({
+        code,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+        expiresAt: new Date(Date.now() + 60 * 1000),
+      }),
+    );
+    return code;
+  }
+
+  /** Single-use: the row is deleted immediately whether or not it was found/valid. */
+  async exchangeOAuthCode(code: string): Promise<AuthResponseDto> {
+    const entry = await this.oauthExchangeCodeRepo.findOne({ where: { code } });
+    if (entry) await this.oauthExchangeCodeRepo.delete(entry.id);
+    // Opportunistic cleanup of stale rows — this table has no scheduled job of its own.
+    await this.oauthExchangeCodeRepo.delete({ expiresAt: LessThan(new Date()) });
+
+    if (!entry || entry.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired exchange code');
+    }
+    return { accessToken: entry.accessToken, refreshToken: entry.refreshToken, expiresIn: entry.expiresIn };
   }
 
   private async generateTokens(

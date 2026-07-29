@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { GiftCardCode, GiftCardCodeStatus, GiftCardCodeSource } from './entities/gift-card-code.entity';
 import { ProductVariant } from '../entities/product-variant.entity';
 import { GiftCardSupplierConfigDto } from './dto/gift-card-code.dto';
@@ -20,6 +20,7 @@ export class GiftCardCodesService {
     @InjectRepository(GiftCardCode) private readonly repo: Repository<GiftCardCode>,
     @InjectRepository(ProductVariant) private readonly variantRepo: Repository<ProductVariant>,
     private readonly likeCardService: LikeCardService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   async bulkUpload(productId: string, variantId: string | undefined, rawCodes: string[]) {
@@ -197,20 +198,33 @@ export class GiftCardCodesService {
     const { productId, variantId, quantity, orderId, orderItemId, customerId } = params;
     const codes: string[] = [];
 
-    const available = await this.repo.find({
-      where: { productId, variantId: variantId ?? undefined, status: GiftCardCodeStatus.AVAILABLE },
-      take: quantity,
-      order: { createdAt: 'ASC' },
+    // Pessimistic row lock inside a transaction: two concurrent calls for the same product/
+    // variant now serialize on these rows instead of both SELECTing the same AVAILABLE codes
+    // before either commits its SOLD update — without this, both could claim (and both email
+    // out) the exact same code.
+    const claimed = await this.dataSource.transaction(async (manager) => {
+      const qb = manager
+        .createQueryBuilder(GiftCardCode, 'c')
+        .setLock('pessimistic_write')
+        .where('c.productId = :productId', { productId })
+        .andWhere('c.status = :status', { status: GiftCardCodeStatus.AVAILABLE })
+        .orderBy('c.createdAt', 'ASC')
+        .take(quantity);
+      if (variantId) qb.andWhere('c.variantId = :variantId', { variantId });
+      else qb.andWhere('c.variantId IS NULL');
+
+      const rows = await qb.getMany();
+      for (const c of rows) {
+        c.status = GiftCardCodeStatus.SOLD;
+        c.orderId = orderId;
+        c.orderItemId = orderItemId;
+        c.customerId = customerId;
+        c.soldAt = new Date();
+      }
+      if (rows.length) await manager.save(GiftCardCode, rows);
+      return rows;
     });
-    for (const c of available) {
-      c.status = GiftCardCodeStatus.SOLD;
-      c.orderId = orderId;
-      c.orderItemId = orderItemId;
-      c.customerId = customerId;
-      c.soldAt = new Date();
-      codes.push(c.code);
-    }
-    if (available.length) await this.repo.save(available);
+    for (const c of claimed) codes.push(c.code);
 
     let shortfall = quantity - codes.length;
     if (shortfall > 0 && variantId) {

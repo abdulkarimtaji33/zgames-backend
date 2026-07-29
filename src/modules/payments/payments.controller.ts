@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -15,10 +16,20 @@ export class PaymentsController {
   constructor(private readonly svc: PaymentsService) {}
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard)
-  @Get('order/:orderId') findByOrder(@Param('orderId', ParseUUIDPipe) orderId: string) { return this.svc.findByOrder(orderId); }
+  @Get('order/:orderId') findByOrder(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @CurrentUser() user: { id: string; roles?: Array<{ name: string } | string> },
+  ) {
+    return this.svc.findByOrder(orderId, user);
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard)
-  @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
+  @Get(':id') findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { id: string; roles?: Array<{ name: string } | string> },
+  ) {
+    return this.svc.findOne(id, user);
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard)
   @Post('intent') @ApiOperation({ summary: 'Create payment intent' })

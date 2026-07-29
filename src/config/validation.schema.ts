@@ -11,7 +11,14 @@ export const validationSchema = Joi.object({
   DB_USERNAME: Joi.string().default('root'),
   DB_PASSWORD: Joi.string().allow('').default(''),
   DB_NAME: Joi.string().default('cgagames'),
-  JWT_SECRET: Joi.string().default('change-me-in-production'),
+  // Required (no fallback) in production — booting with a hardcoded, source-visible default
+  // secret would let anyone who reads this file forge valid JWTs. Dev/test keep a convenience
+  // default so local setup isn't blocked.
+  JWT_SECRET: Joi.string().min(16).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.optional().default('dev-only-insecure-default-do-not-use-in-production'),
+  }),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
   AWS_REGION: Joi.string().default('me-south-1'),

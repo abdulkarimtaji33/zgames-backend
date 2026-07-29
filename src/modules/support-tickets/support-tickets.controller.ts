@@ -17,7 +17,9 @@ export class SupportTicketsController {
   @UseGuards(RolesGuard) @Roles('super_admin', 'admin', 'customer_support')
   @Get() findAll(@Query() q: TicketQueryDto) { return this.svc.findAll(q); }
 
-  @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
+  @Get(':id') findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: { id: string; roles?: Array<{ name: string } | string> }) {
+    return this.svc.findOne(id, user);
+  }
 
   @Post() create(@CurrentUser() user: { id: string }, @Body() dto: CreateTicketDto) { return this.svc.create(user.id, dto); }
 

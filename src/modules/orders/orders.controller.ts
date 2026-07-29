@@ -39,8 +39,11 @@ export class OrdersController {
   @Get(':id') @ApiOperation({ summary: 'Get order by ID (admin)' })
   findOne(@Param('id', ParseUUIDPipe) id: string) { return this.svc.findOne(id); }
 
+  @Public()
   @Get('track/:orderNumber') @ApiOperation({ summary: 'Track order by number (public)' })
-  track(@Param('orderNumber') orderNumber: string) { return this.svc.findByOrderNumber(orderNumber); }
+  track(@Param('orderNumber') orderNumber: string, @Query('email') email?: string) {
+    return this.svc.findByOrderNumber(orderNumber, email);
+  }
 
   @Public() @UseGuards(OptionalJwtAuthGuard)
   @Post() create(@Body() dto: CreateOrderDto, @Req() req: Request) {
