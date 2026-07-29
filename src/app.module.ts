@@ -13,6 +13,7 @@ import { UsersModule } from './modules/users/users.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { ProductsModule } from './modules/products/products.module';
 import { GiftCardCodesModule } from './modules/products/gift-card-codes/gift-card-codes.module';
+import { LikeCardModule } from './modules/integrations/likecard/likecard.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { AttributesModule } from './modules/attributes/attributes.module';
@@ -60,6 +61,7 @@ import { SettingsModule } from './modules/settings/settings.module';
     CustomersModule,
     ProductsModule,
     GiftCardCodesModule,
+    LikeCardModule,
     CategoriesModule,
     BrandsModule,
     AttributesModule,

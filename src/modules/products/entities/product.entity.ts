@@ -44,6 +44,7 @@ export enum ProductRegion {
   KSA = 'ksa',
   QATAR = 'qatar',
   KUWAIT = 'kuwait',
+  OMAN = 'oman',
   BAHRAIN = 'bahrain',
   INTERNATIONAL = 'international',
   GLOBAL = 'global',

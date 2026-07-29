@@ -5,9 +5,10 @@ import { ProductVariant } from '../entities/product-variant.entity';
 import { GiftCardCodesService } from './gift-card-codes.service';
 import { GiftCardCodesController } from './gift-card-codes.controller';
 import { OrdersModule } from '../../orders/orders.module';
+import { LikeCardModule } from '../../integrations/likecard/likecard.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([GiftCardCode, ProductVariant]), forwardRef(() => OrdersModule)],
+  imports: [TypeOrmModule.forFeature([GiftCardCode, ProductVariant]), forwardRef(() => OrdersModule), LikeCardModule],
   providers: [GiftCardCodesService],
   controllers: [GiftCardCodesController],
   exports: [GiftCardCodesService],

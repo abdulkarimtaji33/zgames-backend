@@ -50,6 +50,14 @@ export class GiftCardCode extends AbstractEntity {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
+  /** LikeCard's own order id, set only when this code was fulfilled via a live LikeCard create_order call. */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  likecardOrderId: string | null;
+
+  /** Our own idempotency referenceId sent to LikeCard's create_order — kept for reconciliation/support lookups. */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  likecardReferenceId: string | null;
+
   @ManyToOne(() => Product, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'productId' })
   product: Product;

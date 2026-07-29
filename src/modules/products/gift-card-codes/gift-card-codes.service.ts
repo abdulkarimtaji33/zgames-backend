@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { GiftCardCode, GiftCardCodeStatus, GiftCardCodeSource } from './entities/gift-card-code.entity';
 import { ProductVariant } from '../entities/product-variant.entity';
 import { GiftCardSupplierConfigDto } from './dto/gift-card-code.dto';
+import { LikeCardService } from '../../integrations/likecard/likecard.service';
+import { LikeCardApiError } from '../../integrations/likecard/likecard.exceptions';
 
 export interface AssignCodesResult {
   codes: string[];
@@ -17,6 +19,7 @@ export class GiftCardCodesService {
   constructor(
     @InjectRepository(GiftCardCode) private readonly repo: Repository<GiftCardCode>,
     @InjectRepository(ProductVariant) private readonly variantRepo: Repository<ProductVariant>,
+    private readonly likeCardService: LikeCardService,
   ) {}
 
   async bulkUpload(productId: string, variantId: string | undefined, rawCodes: string[]) {
@@ -33,6 +36,11 @@ export class GiftCardCodesService {
     );
     await this.repo.save(entities);
     return { uploaded: entities.length };
+  }
+
+  /** Lets support staff see whether a delivered code came from local stock or a live LikeCard order. */
+  async listByOrderItem(orderItemId: string) {
+    return this.repo.find({ where: { orderItemId }, order: { soldAt: 'ASC' } });
   }
 
   async listByProduct(productId: string, variantId?: string, status?: GiftCardCodeStatus) {
@@ -87,6 +95,64 @@ export class GiftCardCodesService {
       if (acc && typeof acc === 'object') return (acc as Record<string, unknown>)[key];
       return undefined;
     }, obj);
+  }
+
+  /**
+   * Attempts to fulfill `quantity` units one-by-one via a live LikeCard order for this variant.
+   * Each unit gets its own unique referenceId (derived from orderItemId) — LikeCard quantity is
+   * always 1 per its docs. Stops at the first failure (low balance, unavailable, pricing violation,
+   * auth/blocked-IP, timeout) and leaves the remainder as shortfall for manual fulfillment.
+   */
+  private async fetchFromLikeCard(
+    variant: ProductVariant,
+    quantity: number,
+    orderItemId: string,
+  ): Promise<Array<{ code: string; likecardOrderId: string; likecardReferenceId: string }>> {
+    const likecardProductId = variant.likecardProductId;
+    if (!likecardProductId) return [];
+    const results: Array<{ code: string; likecardOrderId: string; likecardReferenceId: string }> = [];
+
+    for (let i = 0; i < quantity; i++) {
+      const referenceId = `oi-${orderItemId}-${i}`;
+      try {
+        const balance = await this.likeCardService.checkBalance();
+        if (!balance.configured) {
+          this.logger.warn(`LikeCard not configured — leaving variant ${variant.id} shortfall for manual fulfillment`);
+          break;
+        }
+
+        // Two-step order safety: verify live availability/cost right before charging the customer.
+        const liveProduct = await this.likeCardService.getLiveProduct(likecardProductId);
+        if (!liveProduct) {
+          this.logger.error(`LikeCard product ${likecardProductId} not found (or a required field was null) — stopping, not proceeding with partial data`);
+          break;
+        }
+        if (liveProduct.available === false) {
+          this.logger.warn(`LikeCard product ${likecardProductId} is currently unavailable — leaving shortfall for manual fulfillment`);
+          break;
+        }
+
+        const costPrice = liveProduct.costPrice ?? liveProduct.price;
+        this.likeCardService.assertPricingIsSafe(Number(variant.price), costPrice);
+
+        if (balance.balance < costPrice) {
+          this.logger.error(`LikeCard balance (${balance.balance}) too low to cover cost ${costPrice} for product ${likecardProductId} — ALERT: low balance`);
+          break;
+        }
+
+        const { code, likecardOrderId } = await this.likeCardService.fulfillSingleUnit(likecardProductId, referenceId);
+        results.push({ code, likecardOrderId, likecardReferenceId: referenceId });
+      } catch (err) {
+        if (err instanceof LikeCardApiError) {
+          this.logger.error(`LikeCard order failed for variant ${variant.id} referenceId=${referenceId} [${err.name}]: ${err.message}`);
+        } else {
+          this.logger.error(`LikeCard order failed for variant ${variant.id} referenceId=${referenceId}: ${err}`);
+        }
+        break;
+      }
+    }
+
+    return results;
   }
 
   /** Attempts to fetch `quantity` codes from a configured third-party supplier API. */
@@ -149,7 +215,30 @@ export class GiftCardCodesService {
     let shortfall = quantity - codes.length;
     if (shortfall > 0 && variantId) {
       const variant = await this.variantRepo.findOne({ where: { id: variantId } });
-      if (variant?.giftCardSupplierConfig?.enabled) {
+
+      if (variant?.likecardProductId) {
+        const fetched = await this.fetchFromLikeCard(variant, shortfall, orderItemId);
+        if (fetched.length) {
+          const entities = fetched.map(({ code, likecardOrderId, likecardReferenceId }) =>
+            this.repo.create({
+              productId,
+              variantId,
+              code,
+              status: GiftCardCodeStatus.SOLD,
+              source: GiftCardCodeSource.API,
+              orderId,
+              orderItemId,
+              customerId,
+              soldAt: new Date(),
+              likecardOrderId,
+              likecardReferenceId,
+            }),
+          );
+          await this.repo.save(entities);
+          codes.push(...fetched.map((f) => f.code));
+          shortfall = quantity - codes.length;
+        }
+      } else if (variant?.giftCardSupplierConfig?.enabled) {
         const fetched = await this.fetchFromSupplier(variant, shortfall);
         if (fetched.length) {
           const entities = fetched.map((code) =>

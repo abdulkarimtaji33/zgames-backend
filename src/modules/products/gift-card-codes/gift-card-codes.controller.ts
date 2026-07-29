@@ -48,6 +48,11 @@ export class GiftCardCodesController {
     return this.svc.configureSupplier(variantId, dto);
   }
 
+  @Get('orders/:orderId/items/:itemId/gift-card-codes')
+  listByOrderItem(@Param('itemId', ParseUUIDPipe) itemId: string) {
+    return this.svc.listByOrderItem(itemId);
+  }
+
   @Get('gift-card-codes/low-stock')
   lowStock(@Query('threshold') threshold?: string) {
     return this.svc.lowStock(threshold ? Number(threshold) : undefined);

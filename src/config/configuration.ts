@@ -44,4 +44,14 @@ export default () => ({
     facebookAppId: process.env.FACEBOOK_APP_ID ?? '',
     facebookAppSecret: process.env.FACEBOOK_APP_SECRET ?? '',
   },
+  likecard: {
+    apiUrl: process.env.LIKECARD_API_URL ?? 'https://taxes.like4app.com',
+    deviceId: process.env.LIKECARD_DEVICE_ID ?? '',
+    email: process.env.LIKECARD_EMAIL ?? '',
+    securityCode: process.env.LIKECARD_SECURITY_CODE ?? '',
+    langId: parseInt(process.env.LIKECARD_LANG_ID ?? '1', 10),
+    hashPhone: process.env.LIKECARD_HASH_PHONE ?? '',
+    hashKey: process.env.LIKECARD_HASH_KEY ?? '',
+    markupPercent: parseFloat(process.env.LIKECARD_MARKUP_PERCENT ?? '15'),
+  },
 });

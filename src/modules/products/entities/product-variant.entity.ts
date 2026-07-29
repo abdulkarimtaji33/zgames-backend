@@ -39,6 +39,10 @@ export class ProductVariant extends AbstractEntity {
     codePath?: string;
   } | null;
 
+  /** LikeCard's own product id, when this variant is fulfilled by live LikeCard orders instead of (or in addition to) local stock. */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  likecardProductId: string | null;
+
   @ManyToOne(() => Product, (product) => product.variants, {
     onDelete: 'CASCADE',
   })
