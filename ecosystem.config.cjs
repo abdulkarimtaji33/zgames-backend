@@ -8,14 +8,16 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: '512M',
+      // This VPS is dual-stack (IPv4 + IPv6); Node's default DNS resolution prefers IPv6 when
+      // both are available. Some outbound APIs (e.g. LikeCard, behind Cloudflare) only allow
+      // the account's whitelisted IPv4 address and block the server's (never-whitelisted,
+      // effectively random) IPv6 address instead. Force IPv4-first resolution process-wide.
+      // Passed via node_args (not env.NODE_OPTIONS) — PM2 cluster mode does not reliably
+      // propagate NODE_OPTIONS as a true env var to the forked worker process.
+      node_args: ['--dns-result-order=ipv4first'],
       env: {
         NODE_ENV: 'production',
         PORT: 3330,
-        // This VPS is dual-stack (IPv4 + IPv6); Node's default DNS resolution prefers IPv6 when
-        // both are available. Some outbound APIs (e.g. LikeCard, behind Cloudflare) only allow
-        // the account's whitelisted IPv4 address and block the server's (never-whitelisted,
-        // effectively random) IPv6 address instead. Force IPv4-first resolution process-wide.
-        NODE_OPTIONS: '--dns-result-order=ipv4first',
       },
     },
   ],
