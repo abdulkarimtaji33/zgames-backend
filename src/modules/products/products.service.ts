@@ -8,6 +8,7 @@ import { ProductSpecification } from './entities/product-specification.entity';
 import { ProductFaq } from './entities/product-faq.entity';
 import { ProductDownload } from './entities/product-download.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import {
   CreateProductDto, UpdateProductDto, ProductQueryDto,
   CreateProductVariantDto, UpdateProductVariantDto,
@@ -64,16 +65,31 @@ export class ProductsService {
     return result;
   }
 
-  /** Attaches stockQuantity (and per-variant stockQuantity, if variants are loaded) to a product. */
+  /** True when a variant can be fulfilled on demand (LikeCard or a generic API supplier) with no local warehouse stock required. */
+  private hasSupplierFulfillment(v: ProductVariant): boolean {
+    return Boolean(v.likecardProductId) || Boolean(v.giftCardSupplierConfig?.enabled);
+  }
+
+  /**
+   * Attaches stockQuantity (and per-variant stockQuantity, if variants are loaded) to a product,
+   * plus hasSupplierFulfillment — true when a variant is fulfilled on demand via a live supplier
+   * API (LikeCard, or a generic configured supplier) rather than requiring local warehouse stock.
+   * The storefront must treat these as purchasable even when stockQuantity is 0.
+   */
   private async attachStock<T extends Product>(p: T): Promise<T> {
     const stock = await this.getStockByProductIds([p.id]);
     const entry = stock.get(p.id);
     (p as unknown as { stockQuantity: number }).stockQuantity = entry?.total ?? 0;
+    let productHasSupplierFulfillment = false;
     if (Array.isArray(p.variants) && p.variants.length) {
       for (const v of p.variants) {
         (v as unknown as { stockQuantity: number }).stockQuantity = entry?.byVariant[v.id] ?? 0;
+        const supplierFulfillment = this.hasSupplierFulfillment(v);
+        (v as unknown as { hasSupplierFulfillment: boolean }).hasSupplierFulfillment = supplierFulfillment;
+        if (supplierFulfillment) productHasSupplierFulfillment = true;
       }
     }
+    (p as unknown as { hasSupplierFulfillment: boolean }).hasSupplierFulfillment = productHasSupplierFulfillment;
     return p;
   }
 
@@ -102,13 +118,33 @@ export class ProductsService {
     if (query.categoryId) {
       qb.andWhere('p.categoryId = :cid', { cid: query.categoryId });
     }
+    if (query.type?.length) qb.andWhere('p.type IN (:...ptype)', { ptype: query.type });
     if (query.inStock) {
       qb.andWhere(`EXISTS (SELECT 1 FROM inventory inv WHERE inv.productId = p.id AND (inv.quantity - inv.reservedQuantity) > 0)`);
     }
+    if (query.isOnSale) {
+      qb.andWhere('p.salePrice IS NOT NULL AND p.salePrice < p.price');
+    }
 
-    const sortField = ['price', 'name', 'createdAt', 'avgRating', 'reviewCount'].includes(query.sortBy ?? '')
-      ? `p.${query.sortBy}` : 'p.createdAt';
-    qb.orderBy(sortField, query.sortOrder === 'ASC' ? 'ASC' : 'DESC');
+    const sortOrder = query.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+    if (query.sortBy === 'soldCount') {
+      qb.leftJoin(
+        (sub) =>
+          sub
+            .select('oi.productId', 'productId')
+            .addSelect('SUM(oi.quantity)', 'soldCount')
+            .from(OrderItem, 'oi')
+            .groupBy('oi.productId'),
+        'soldStats',
+        'soldStats.productId = p.id',
+      )
+        .addSelect('COALESCE(soldStats.soldCount, 0)', 'soldCount')
+        .orderBy('COALESCE(soldStats.soldCount, 0)', sortOrder);
+    } else {
+      const sortField = ['price', 'name', 'createdAt', 'avgRating', 'reviewCount'].includes(query.sortBy ?? '')
+        ? `p.${query.sortBy}` : 'p.createdAt';
+      qb.orderBy(sortField, sortOrder);
+    }
 
     const [items, total] = await qb.getManyAndCount();
 

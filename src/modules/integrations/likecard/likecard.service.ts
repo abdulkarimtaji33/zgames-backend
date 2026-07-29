@@ -210,7 +210,9 @@ export class LikeCardService {
       slug,
       sku,
       type: ProductType.DIGITAL,
-      platform: ProductPlatform.PS5,
+      // PSN wallet credit works on any PlayStation hardware (PS4/PS5 alike) — never tag as PS5
+      // specifically, or it wrongly floods PS5-hardware-only storefront rails/filters.
+      platform: ProductPlatform.MULTI,
       region,
       categoryId,
       price,

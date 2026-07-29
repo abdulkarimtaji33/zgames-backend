@@ -73,6 +73,12 @@ export class ProductQueryDto {
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isPreorder?: boolean;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isComingSoon?: boolean;
   @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() inStock?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBoolean) @IsBoolean() isOnSale?: boolean;
+  @ApiPropertyOptional({ enum: ProductType, isArray: true })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined ? value : Array.isArray(value) ? value : [value]))
+  @IsEnum(ProductType, { each: true })
+  type?: ProductType[];
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) minPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) @Type(() => Number) maxPrice?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() sortBy?: string;
