@@ -139,7 +139,7 @@ export class ProductsService {
         'soldStats.productId = p.id',
       )
         .addSelect('COALESCE(soldStats.soldCount, 0)', 'soldCount')
-        .orderBy('COALESCE(soldStats.soldCount, 0)', sortOrder);
+        .orderBy('soldCount', sortOrder);
     } else {
       const sortField = ['price', 'name', 'createdAt', 'avgRating', 'reviewCount'].includes(query.sortBy ?? '')
         ? `p.${query.sortBy}` : 'p.createdAt';
