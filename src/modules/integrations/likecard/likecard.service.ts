@@ -6,6 +6,7 @@ import slugify from 'slugify';
 import { LikeCardApiService } from './likecard-api.service';
 import { Product, ProductRegion, ProductType, ProductPlatform } from '../../products/entities/product.entity';
 import { ProductVariant } from '../../products/entities/product-variant.entity';
+import { Category } from '../../categories/entities/category.entity';
 import { LikeCardCategory, LikeCardProduct } from './likecard.types';
 import { LikeCardApiError } from './likecard.exceptions';
 
@@ -53,7 +54,28 @@ export class LikeCardService {
     private readonly config: ConfigService,
     @InjectRepository(Product) private readonly productRepo: Repository<Product>,
     @InjectRepository(ProductVariant) private readonly variantRepo: Repository<ProductVariant>,
+    @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
   ) {}
+
+  private giftCardsCategoryId: string | null = null;
+
+  /** Storefront browse/purchase page for synced products is /[locale]/category/gift-cards — ensure that category exists. */
+  private async getOrCreateGiftCardsCategory(): Promise<string> {
+    if (this.giftCardsCategoryId) return this.giftCardsCategoryId;
+    let category = await this.categoryRepo.findOne({ where: { slug: 'gift-cards' } });
+    if (!category) {
+      category = this.categoryRepo.create({
+        name: 'Gift Cards',
+        slug: 'gift-cards',
+        description: 'Digital gift cards and store credit for gaming platforms.',
+        isActive: true,
+      });
+      await this.categoryRepo.save(category);
+      this.logger.log('Created missing "gift-cards" category for LikeCard-synced products');
+    }
+    this.giftCardsCategoryId = category.id;
+    return category.id;
+  }
 
   isConfigured(): boolean {
     return this.api.isConfigured();
@@ -163,6 +185,7 @@ export class LikeCardService {
     const displayName = `PlayStation Store Gift Card — ${this.regionLabel(region)} — ${lcProduct.name.replace(/likecard|like4card/gi, '').trim()}`.trim();
     const sku = `LC-PSN-${lcProduct.id}`;
     const slug = await this.generateUniqueSlug(displayName);
+    const categoryId = await this.getOrCreateGiftCardsCategory();
 
     const product = this.productRepo.create({
       name: displayName,
@@ -171,6 +194,7 @@ export class LikeCardService {
       type: ProductType.DIGITAL,
       platform: ProductPlatform.PS5,
       region,
+      categoryId,
       price,
       costPrice: lcProduct.costPrice ?? null,
       isActive: true,
