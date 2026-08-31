@@ -396,7 +396,9 @@ export class LikeCardService {
    */
   async fulfillSingleUnit(likecardProductId: string, referenceId: string): Promise<{ code: string; likecardOrderId: string }> {
     const order = await this.api.createOrder(likecardProductId, referenceId);
-    const code = order.codes?.[0];
+    // Live responses deliver the unit under serials[0].serialCode, not a top-level `codes` array —
+    // codes is checked only as a fallback in case some other LikeCard response shape uses it.
+    const code = order.serials?.[0]?.serialCode ?? order.codes?.[0];
     if (!code) {
       throw new LikeCardApiError('LikeCard create_order succeeded but returned no code', 'create_order');
     }

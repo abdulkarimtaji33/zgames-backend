@@ -45,11 +45,29 @@ export interface LikeCardProduct {
   [key: string]: unknown;
 }
 
+/**
+ * A single delivered unit. serialCode is the field that actually carries the redeemable code (confirmed
+ * against a live create_order response) — it is base64-encoded and may be further encoded/encrypted by
+ * LikeCard beyond that; the exact scheme isn't documented anywhere in this codebase, so treat the decoded
+ * value as unconfirmed until checked against LikeCard's docs or support.
+ */
+export interface LikeCardSerial {
+  serialId?: string;
+  serialCode?: string;
+  serialNumber?: string;
+  serialBarcode?: string;
+  validTo?: string;
+  [key: string]: unknown;
+}
+
 export interface LikeCardOrder {
   orderId: string;
   referenceId: string;
   productId: string;
   status: string;
+  /** Real create_order/orders-details responses deliver units under `serials`, not `codes` — `codes` has
+   *  never been observed on a live response and is kept only in case some other endpoint uses it. */
+  serials?: LikeCardSerial[];
   codes?: string[];
   [key: string]: unknown;
 }
