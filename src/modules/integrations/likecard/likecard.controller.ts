@@ -8,8 +8,12 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import {
   GetLikeCardOrderDetailsQueryDto,
   ListLikeCardOrdersQueryDto,
+  SyncCategoryDto,
   SyncPlaystationCatalogDto,
+  SyncPopularCatalogsDto,
+  TestPurchaseDto,
 } from './dto/likecard.dto';
+import { LIKECARD_TEST_PRODUCT_IDS } from './likecard-test-products';
 
 /** Staff-only: internal supplier reconciliation screens. Nothing here is ever customer-facing. */
 @ApiTags('Integrations - LikeCard')
@@ -43,9 +47,34 @@ export class LikeCardController {
     return this.likeCardService.syncPlaystationCatalog(dto.markupPercent);
   }
 
+  /** Syncs a single platform's catalog by category name, e.g. { "categoryName": "roblox" }. */
+  @Post('sync-category')
+  syncCategory(@Body() dto: SyncCategoryDto) {
+    return this.likeCardService.syncCategory({ categoryName: dto.categoryName, displayLabel: dto.categoryName, skuPrefix: 'LC' }, dto.markupPercent);
+  }
+
+  /** Syncs every popular platform (PlayStation, Roblox, Steam, Xbox, Google Play, iTunes, Amazon, Nintendo eShop, Spotify, ...) in one pass. */
+  @Post('sync-popular')
+  syncPopular(@Body() dto: SyncPopularCatalogsDto) {
+    return this.likeCardService.syncPopularCatalogs(dto.markupPercent);
+  }
+
   @Get('sync-status')
   syncStatus() {
     return this.likeCardService.getSyncStatus();
+  }
+
+  /** The LikeCard-supplied product IDs safe to use with POST test-purchase (no real money). */
+  @Get('test-product-ids')
+  testProductIds() {
+    return { productIds: LIKECARD_TEST_PRODUCT_IDS };
+  }
+
+  /** Sandbox order placement — restricted to LIKECARD_TEST_PRODUCT_IDS, never charges real money. */
+  @Post('test-purchase')
+  testPurchase(@Body() dto: TestPurchaseDto) {
+    const referenceId = dto.referenceId ?? `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return this.likeCardService.testPurchase(dto.productId, referenceId);
   }
 
   @Get('orders')

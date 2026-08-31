@@ -10,6 +10,7 @@ import { ProductImage } from '../../products/entities/product-image.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { LikeCardCategory, LikeCardProduct } from './likecard.types';
 import { LikeCardApiError } from './likecard.exceptions';
+import { isLikeCardTestProductId } from './likecard-test-products';
 
 // LikeCard's real PlayStation sub-category names are formatted like "PSN - UAE", "PSN - Saudi
 // Arabia", etc. (confirmed live) — match by keyword contained in the name, not exact equality.
@@ -35,6 +36,35 @@ export interface CatalogSyncResult {
   productsCreated: number;
   productsUpdated: number;
   skippedNoRegionMatch: string[];
+}
+
+/** One entry per popular platform whose LikeCard catalog we sync in bulk via syncPopularCatalogs(). */
+export interface PopularCatalogConfig {
+  /** Substring (case-insensitive) matched against LikeCard's top-level category names. */
+  categoryName: string;
+  /** Customer-facing product name prefix, e.g. "Roblox Gift Card". */
+  displayLabel: string;
+  /** SKU prefix, e.g. "LC-RBLX". */
+  skuPrefix: string;
+}
+
+/** LikeCard top-level categories for the most popular digital gift card platforms we resell. */
+export const POPULAR_CATALOGS: PopularCatalogConfig[] = [
+  { categoryName: 'playstation', displayLabel: 'PlayStation Store Gift Card', skuPrefix: 'LC-PSN' },
+  { categoryName: 'roblox', displayLabel: 'Roblox Gift Card', skuPrefix: 'LC-RBLX' },
+  { categoryName: 'steam', displayLabel: 'Steam Wallet Gift Card', skuPrefix: 'LC-STEAM' },
+  { categoryName: 'xbox', displayLabel: 'Xbox Gift Card', skuPrefix: 'LC-XBOX' },
+  { categoryName: 'google play', displayLabel: 'Google Play Gift Card', skuPrefix: 'LC-GPLAY' },
+  { categoryName: 'itunes', displayLabel: 'iTunes Gift Card', skuPrefix: 'LC-ITUNES' },
+  { categoryName: 'apple', displayLabel: 'Apple Gift Card', skuPrefix: 'LC-APPLE' },
+  { categoryName: 'amazon', displayLabel: 'Amazon Gift Card', skuPrefix: 'LC-AMZN' },
+  { categoryName: 'nintendo', displayLabel: 'Nintendo eShop Gift Card', skuPrefix: 'LC-NNTD' },
+  { categoryName: 'spotify', displayLabel: 'Spotify Gift Card', skuPrefix: 'LC-SPTFY' },
+];
+
+export interface PopularCatalogSyncResult extends CatalogSyncResult {
+  categoriesSynced: string[];
+  categoriesNotFound: string[];
 }
 
 export interface CatalogSyncStatus {
@@ -114,28 +144,29 @@ export class LikeCardService {
     }
   }
 
-  /** Finds the "PlayStation" node in LikeCard's category tree and its direct region sub-categories. */
-  private findPlaystationRegionCategories(categories: LikeCardCategory[]): LikeCardCategory[] {
+  /** Finds the node in LikeCard's category tree whose name contains `categoryName` and returns its direct region sub-categories. */
+  private findCategoryRegionChildren(categories: LikeCardCategory[], categoryName: string): LikeCardCategory[] {
     const flatten = (nodes: LikeCardCategory[]): LikeCardCategory[] =>
       nodes.flatMap((n) => [n, ...(n.childs ? flatten(n.childs) : [])]);
     const all = flatten(categories);
-    const playstation = all.find((c) => c.categoryName.trim().toLowerCase() === 'playstation');
-    if (!playstation) return [];
-    return playstation.childs ?? [];
+    const needle = categoryName.trim().toLowerCase();
+    const match = all.find((c) => c.categoryName.trim().toLowerCase().includes(needle));
+    if (!match) return [];
+    return match.childs ?? [];
   }
 
   /**
-   * Pulls PlayStation categories/products from LikeCard and upserts local Product/ProductVariant
+   * Pulls a given platform's categories/products from LikeCard and upserts local Product/ProductVariant
    * rows. Region sub-category IDs are discovered live from the categories response (not hardcoded)
    * since real IDs are only known once credentials/IP whitelisting are in place.
    */
-  async syncPlaystationCatalog(markupPercentOverride?: number): Promise<CatalogSyncResult> {
+  async syncCategory(catalog: PopularCatalogConfig, markupPercentOverride?: number): Promise<CatalogSyncResult> {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException('LikeCard is not yet configured (missing deviceId/email/securityCode env vars).');
     }
 
     const categories = await this.api.getCategories();
-    const regionCategories = this.findPlaystationRegionCategories(categories);
+    const regionCategories = this.findCategoryRegionChildren(categories, catalog.categoryName);
 
     const result: CatalogSyncResult = {
       regionsFound: [],
@@ -148,7 +179,7 @@ export class LikeCardService {
       const region = matchRegion(cat.categoryName);
       if (!region) {
         result.skippedNoRegionMatch.push(cat.categoryName);
-        this.logger.warn(`LikeCard PlayStation sub-category "${cat.categoryName}" (id=${cat.id}) did not match a known ProductRegion — skipped`);
+        this.logger.warn(`LikeCard "${catalog.categoryName}" sub-category "${cat.categoryName}" (id=${cat.id}) did not match a known ProductRegion — skipped`);
         continue;
       }
       result.regionsFound.push({ categoryId: cat.id, categoryName: cat.categoryName, region });
@@ -159,13 +190,54 @@ export class LikeCardService {
           this.logger.log(`Skipping LikeCard demo product "${lcProduct.productName}" (id=${lcProduct.productId})`);
           continue;
         }
-        const created = await this.upsertProductFromLikeCard(lcProduct, region, markupPercentOverride);
+        const created = await this.upsertProductFromLikeCard(lcProduct, region, catalog, markupPercentOverride);
         if (created) result.productsCreated++;
         else result.productsUpdated++;
       }
     }
 
     return result;
+  }
+
+  /** Back-compat wrapper — PlayStation was the first platform synced; kept as a thin call into syncCategory(). */
+  async syncPlaystationCatalog(markupPercentOverride?: number): Promise<CatalogSyncResult> {
+    return this.syncCategory(POPULAR_CATALOGS[0], markupPercentOverride);
+  }
+
+  /**
+   * Syncs every catalog in POPULAR_CATALOGS (PlayStation, Roblox, Steam, Xbox, Google Play, iTunes,
+   * Amazon, Nintendo eShop, Spotify, ...) in one pass. A platform whose top-level category isn't
+   * found in LikeCard's tree is recorded in categoriesNotFound rather than throwing, since the exact
+   * set of categories LikeCard exposes to a given account can vary.
+   */
+  async syncPopularCatalogs(markupPercentOverride?: number): Promise<PopularCatalogSyncResult> {
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException('LikeCard is not yet configured (missing deviceId/email/securityCode env vars).');
+    }
+
+    const combined: PopularCatalogSyncResult = {
+      regionsFound: [],
+      productsCreated: 0,
+      productsUpdated: 0,
+      skippedNoRegionMatch: [],
+      categoriesSynced: [],
+      categoriesNotFound: [],
+    };
+
+    for (const catalog of POPULAR_CATALOGS) {
+      const result = await this.syncCategory(catalog, markupPercentOverride);
+      if (result.regionsFound.length === 0 && result.skippedNoRegionMatch.length === 0) {
+        combined.categoriesNotFound.push(catalog.categoryName);
+        continue;
+      }
+      combined.categoriesSynced.push(catalog.categoryName);
+      combined.regionsFound.push(...result.regionsFound);
+      combined.productsCreated += result.productsCreated;
+      combined.productsUpdated += result.productsUpdated;
+      combined.skippedNoRegionMatch.push(...result.skippedNoRegionMatch);
+    }
+
+    return combined;
   }
 
   /** Extracts the denomination portion of a LikeCard product name (e.g. "USD 50") for our own display name. */
@@ -178,6 +250,7 @@ export class LikeCardService {
   private async upsertProductFromLikeCard(
     lcProduct: LikeCardProduct,
     region: ProductRegion,
+    catalog: PopularCatalogConfig,
     markupPercentOverride?: number,
   ): Promise<boolean> {
     const existingVariant = await this.variantRepo.findOne({ where: { likecardProductId: lcProduct.productId } });
@@ -200,8 +273,8 @@ export class LikeCardService {
 
     // Customer-facing name/description are written fresh here — never copy LikeCard's own
     // product name/branding verbatim, since it may reference the wholesale supplier.
-    const displayName = `PlayStation Store Gift Card — ${this.regionLabel(region)} — ${this.extractDenomination(lcProduct.productName)}`.trim();
-    const sku = `LC-PSN-${lcProduct.productId}`;
+    const displayName = `${catalog.displayLabel} — ${this.regionLabel(region)} — ${this.extractDenomination(lcProduct.productName)}`.trim();
+    const sku = `${catalog.skuPrefix}-${lcProduct.productId}`;
     const slug = await this.generateUniqueSlug(displayName);
     const categoryId = await this.getOrCreateGiftCardsCategory();
 
@@ -213,15 +286,15 @@ export class LikeCardService {
       // only processes items whose snapshotted type === ProductType.GIFT_CARD — tagging these
       // DIGITAL would mean paid orders silently never receive a code.
       type: ProductType.GIFT_CARD,
-      // PSN wallet credit works on any PlayStation hardware (PS4/PS5 alike) — never tag as PS5
-      // specifically, or it wrongly floods PS5-hardware-only storefront rails/filters.
+      // Digital wallet/store credit isn't tied to a specific hardware platform (PS4/PS5, etc.) —
+      // never tag these as hardware-specific, or it wrongly floods hardware-only storefront rails/filters.
       platform: ProductPlatform.MULTI,
       region,
       categoryId,
       price,
       costPrice: lcProduct.productPrice,
       isActive,
-      shortDescription: `Digital PlayStation Store gift card for the ${this.regionLabel(region)} store.`,
+      shortDescription: `Digital ${catalog.displayLabel} for the ${this.regionLabel(region)} store.`,
     });
     await this.productRepo.save(product);
 
@@ -328,5 +401,25 @@ export class LikeCardService {
       throw new LikeCardApiError('LikeCard create_order succeeded but returned no code', 'create_order');
     }
     return { code, likecardOrderId: order.orderId };
+  }
+
+  /**
+   * Sandbox-only order placement against LikeCard's designated test product IDs (LIKECARD_TEST_PRODUCT_IDS).
+   * Restricted to that whitelist so this can never be pointed at a real, wallet-debiting product by
+   * mistake — refuses any productId not on the list before calling out to LikeCard at all.
+   */
+  async testPurchase(likecardProductId: string, referenceId: string): Promise<{ code: string; likecardOrderId: string; product: LikeCardProduct | null }> {
+    if (!isLikeCardTestProductId(likecardProductId)) {
+      throw new BadRequestException(
+        `productId "${likecardProductId}" is not one of LikeCard's designated test product IDs — refusing to avoid an accidental real charge.`,
+      );
+    }
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException('LikeCard is not yet configured (missing deviceId/email/securityCode env vars).');
+    }
+
+    const product = await this.getLiveProduct(likecardProductId);
+    const { code, likecardOrderId } = await this.fulfillSingleUnit(likecardProductId, referenceId);
+    return { code, likecardOrderId, product };
   }
 }
