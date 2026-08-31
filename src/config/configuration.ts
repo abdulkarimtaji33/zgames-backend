@@ -31,6 +31,12 @@ export default () => ({
     apiKey: process.env.RESEND_API_KEY ?? '',
     fromEmail: process.env.RESEND_FROM_EMAIL ?? 'noreply@cgagames.com',
   },
+  smtp: {
+    host: process.env.SMTP_HOST ?? 'smtp.gmail.com',
+    port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 465,
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+  },
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID ?? '',
     authToken: process.env.TWILIO_AUTH_TOKEN ?? '',

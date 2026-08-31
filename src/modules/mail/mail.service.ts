@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
+import * as nodemailer from 'nodemailer';
 
 export interface SendMailOptions {
   to: string | string[];
@@ -12,16 +13,49 @@ export interface SendMailOptions {
 @Injectable()
 export class MailService {
   private readonly resend: Resend | null;
+  private readonly smtpTransport: nodemailer.Transporter | null;
+  private readonly smtpFromEmail: string | null;
   private readonly fromEmail: string;
   private readonly logger = new Logger(MailService.name);
 
   constructor(private readonly config: ConfigService) {
+    // SMTP (e.g. Gmail + app password) takes priority over Resend when both are configured — it's
+    // the transport actually verified against a real inbox for this account.
+    const smtpUser = this.config.get<string>('smtp.user');
+    const smtpPass = this.config.get<string>('smtp.pass');
+    if (smtpUser && smtpPass) {
+      this.smtpTransport = nodemailer.createTransport({
+        host: this.config.get<string>('smtp.host') ?? 'smtp.gmail.com',
+        port: this.config.get<number>('smtp.port') ?? 465,
+        secure: true,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+      this.smtpFromEmail = smtpUser;
+    } else {
+      this.smtpTransport = null;
+      this.smtpFromEmail = null;
+    }
+
     const apiKey = this.config.get<string>('resend.apiKey');
-    this.resend = apiKey ? new Resend(apiKey) : null;
-    this.fromEmail = this.config.get<string>('resend.fromEmail') ?? 'noreply@cgagames.com';
+    this.resend = !this.smtpTransport && apiKey && apiKey !== 'placeholder' ? new Resend(apiKey) : null;
+    this.fromEmail = this.smtpFromEmail ?? this.config.get<string>('resend.fromEmail') ?? 'noreply@cgagames.com';
   }
 
   async send(options: SendMailOptions): Promise<void> {
+    if (this.smtpTransport) {
+      try {
+        await this.smtpTransport.sendMail({
+          from: options.from ?? this.fromEmail,
+          to: options.to,
+          subject: options.subject,
+          html: options.html,
+        });
+      } catch (error) {
+        this.logger.error(`Failed to send email (SMTP) to ${options.to}: ${error}`);
+      }
+      return;
+    }
+
     if (!this.resend) {
       this.logger.warn(`Email not configured — skipping message to ${options.to}`);
       return;
