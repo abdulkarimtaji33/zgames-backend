@@ -19,6 +19,20 @@ import {
   ListOrdersOptions,
 } from './likecard.types';
 
+/**
+ * orders/orders-details responses use orderNumber/orderReferenceId/orderCurrentStatus while
+ * create_order uses orderId/referenceId — normalize the former onto the latter so LikeCardOrder
+ * has one consistent shape regardless of which endpoint produced it.
+ */
+function normalizeOrderFields(raw: Record<string, unknown>): LikeCardOrder {
+  return {
+    ...raw,
+    orderId: (raw.orderId ?? raw.orderNumber) as string,
+    referenceId: (raw.referenceId ?? raw.orderReferenceId) as string,
+    status: (raw.status ?? raw.orderCurrentStatus) as string,
+  } as LikeCardOrder;
+}
+
 const REQUEST_TIMEOUT_MS = 20_000;
 const CREATE_ORDER_RETRY_ATTEMPTS = 6;
 const CREATE_ORDER_RETRY_INTERVAL_MS = 10_000;
@@ -160,34 +174,58 @@ export class LikeCardApiService {
     return this.postForm<LikeCardCategory[]>('categories', {});
   }
 
+  /**
+   * Confirmed against a live response: when a category/set of IDs has zero matching products,
+   * LikeCard returns the failure envelope {response:0, message:"No available products"} rather
+   * than {response:1, data:[]} — normalized to an empty array here so callers (catalog sync
+   * looping over many regions/categories, getLiveProduct()'s "not found" contract) don't have to
+   * treat "genuinely no products" as an exception.
+   */
+  private async getProducts(fields: Record<string, string | string[]>): Promise<LikeCardProduct[]> {
+    try {
+      return await this.postForm<LikeCardProduct[]>('products', fields);
+    } catch (err) {
+      if (err instanceof LikeCardApiError && /no available products/i.test(err.message)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
   /** Docs: sync every 30 minutes and cache products locally. */
   async getProductsByCategory(categoryId: string): Promise<LikeCardProduct[]> {
-    return this.postForm<LikeCardProduct[]>('products', { categoryId });
+    return this.getProducts({ categoryId });
   }
 
   async getProductsByIds(ids: string[]): Promise<LikeCardProduct[]> {
-    return this.postForm<LikeCardProduct[]>('products', { 'ids[]': ids });
+    return this.getProducts({ 'ids[]': ids });
   }
 
+  /** Confirmed against a live response: unlike the comment this used to carry, `orders` DOES require securityCode — omitting it returns {response:0, errorCode:"loginUnsuccessful"}. */
   async listOrders(options: ListOrdersOptions = {}): Promise<LikeCardOrder[]> {
-    return this.postForm<LikeCardOrder[]>(
-      'orders',
-      {
-        page: options.page ? String(options.page) : undefined,
-        orderType: options.orderType,
-        fromUnixTime: options.fromUnixTime ? String(options.fromUnixTime) : undefined,
-        toUnixTime: options.toUnixTime ? String(options.toUnixTime) : undefined,
-      },
-      { includeSecurityCode: false },
-    );
+    const raw = await this.postForm<Record<string, unknown>[]>('orders', {
+      page: options.page ? String(options.page) : undefined,
+      orderType: options.orderType,
+      fromUnixTime: options.fromUnixTime ? String(options.fromUnixTime) : undefined,
+      toUnixTime: options.toUnixTime ? String(options.toUnixTime) : undefined,
+    });
+    return raw.map(normalizeOrderFields);
   }
 
-  /** Docs recommend looking orders up by our own referenceId rather than LikeCard's orderId. */
+  /**
+   * Docs recommend looking orders up by our own referenceId rather than LikeCard's orderId.
+   * Confirmed against a live response: this endpoint's fields are orderNumber/orderReferenceId/
+   * orderCurrentStatus, not orderId/referenceId/status like create_order — normalized here so
+   * every caller of getOrderDetails()/listOrders() can rely on the same LikeCardOrder shape that
+   * createOrder() returns (this matters for resolveTimedOutOrder(), which falls back to this
+   * endpoint and hands its result straight to callers expecting createOrder()'s field names).
+   */
   async getOrderDetails(options: GetOrderDetailsOptions): Promise<LikeCardOrder> {
-    return this.postForm<LikeCardOrder>('orders/details', {
+    const raw = await this.postForm<Record<string, unknown>>('orders/details', {
       orderId: options.orderId,
       referenceId: options.referenceId,
     });
+    return normalizeOrderFields(raw);
   }
 
   /**

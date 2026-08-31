@@ -402,7 +402,9 @@ export class LikeCardService {
     if (!code) {
       throw new LikeCardApiError('LikeCard create_order succeeded but returned no code', 'create_order');
     }
-    return { code, likecardOrderId: order.orderId };
+    // create_order's raw orderId is a JSON number, not a string despite the type — coerce so callers
+    // (and the varchar DB column this feeds) always get a consistent string regardless of path.
+    return { code, likecardOrderId: String(order.orderId) };
   }
 
   /**
