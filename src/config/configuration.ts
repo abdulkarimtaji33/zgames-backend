@@ -27,6 +27,13 @@ export default () => ({
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
   },
+  likecardCrypto: {
+    // Confirmed against LikeCard's own API docs worked example (Create Order / Order Details 200
+    // response sections) — separate from hashKey/securityCode, used only to AES-256-CBC decrypt
+    // serialCode into the actual redeemable code.
+    secretKey: process.env.LIKECARD_SECRET_KEY ?? '',
+    secretIv: process.env.LIKECARD_SECRET_IV ?? '',
+  },
   resend: {
     apiKey: process.env.RESEND_API_KEY ?? '',
     fromEmail: process.env.RESEND_FROM_EMAIL ?? 'noreply@cgagames.com',

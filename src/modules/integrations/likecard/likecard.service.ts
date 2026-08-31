@@ -11,6 +11,7 @@ import { Category } from '../../categories/entities/category.entity';
 import { LikeCardCategory, LikeCardProduct } from './likecard.types';
 import { LikeCardApiError } from './likecard.exceptions';
 import { isLikeCardTestProductId } from './likecard-test-products';
+import { decryptLikeCardSerial } from './likecard-serial-decryptor';
 
 // LikeCard's real PlayStation sub-category names are formatted like "PSN - UAE", "PSN - Saudi
 // Arabia", etc. (confirmed live) — match by keyword contained in the name, not exact equality.
@@ -398,10 +399,31 @@ export class LikeCardService {
     const order = await this.api.createOrder(likecardProductId, referenceId);
     // Live responses deliver the unit under serials[0].serialCode, not a top-level `codes` array —
     // codes is checked only as a fallback in case some other LikeCard response shape uses it.
-    const code = order.serials?.[0]?.serialCode ?? order.codes?.[0];
-    if (!code) {
+    const rawSerial = order.serials?.[0]?.serialCode ?? order.codes?.[0];
+    if (!rawSerial) {
       throw new LikeCardApiError('LikeCard create_order succeeded but returned no code', 'create_order');
     }
+
+    const secretKey = this.config.get<string>('likecardCrypto.secretKey');
+    const secretIv = this.config.get<string>('likecardCrypto.secretIv');
+    if (!secretKey || !secretIv) {
+      throw new ServiceUnavailableException(
+        'LIKECARD_SECRET_KEY/LIKECARD_SECRET_IV are not configured — cannot decrypt the delivered serialCode into a redeemable code.',
+      );
+    }
+
+    let code: string;
+    try {
+      code = decryptLikeCardSerial(rawSerial, secretKey, secretIv);
+    } catch (err) {
+      // The order already succeeded and the wallet was debited — surface this as a distinct error
+      // rather than silently handing the customer an undecryptable blob.
+      throw new LikeCardApiError(
+        `LikeCard order ${order.orderId} succeeded but its serialCode could not be decrypted: ${err}`,
+        'create_order',
+      );
+    }
+
     // create_order's raw orderId is a JSON number, not a string despite the type — coerce so callers
     // (and the varchar DB column this feeds) always get a consistent string regardless of path.
     return { code, likecardOrderId: String(order.orderId) };
