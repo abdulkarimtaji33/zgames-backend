@@ -68,6 +68,6 @@ export default () => ({
     langId: parseInt(process.env.LIKECARD_LANG_ID ?? '1', 10),
     hashPhone: process.env.LIKECARD_HASH_PHONE ?? '',
     hashKey: process.env.LIKECARD_HASH_KEY ?? '',
-    markupPercent: parseFloat(process.env.LIKECARD_MARKUP_PERCENT ?? '15'),
+    markupPercent: parseFloat(process.env.LIKECARD_MARKUP_PERCENT ?? '0'),
   },
 });
