@@ -104,7 +104,7 @@ export class OrdersService {
 
   async findByCustomer(customerId: string, page = 1, limit = 20) {
     const { skip, take } = getPaginationOptions(page, limit);
-    const [items, total] = await this.repo.findAndCount({ where: { customerId }, relations: { items: true }, order: { createdAt: 'DESC' }, skip, take });
+    const [items, total] = await this.repo.findAndCount({ where: { customerId }, relations: { items: true, statusHistory: true }, order: { createdAt: 'DESC' }, skip, take });
     return buildPaginatedResult(items, total, page, limit);
   }
 
@@ -241,13 +241,28 @@ export class OrdersService {
     }));
 
     if (order.customer?.email) {
-      await this.mailService.sendOrderConfirmation(
+      const sent = await this.mailService.sendOrderConfirmation(
         order.customer.email,
         order.customer.firstName,
         order.orderNumber,
         Number(order.total),
         order.currency,
-      ).catch(() => {});
+      ).catch(() => false);
+      await this.historyRepo.save(this.historyRepo.create({
+        orderId: order.id,
+        status: order.status,
+        note: sent
+          ? `Confirmation email sent to ${order.customer.email}`
+          : `Confirmation email FAILED to send to ${order.customer.email} — check mail configuration`,
+        isCustomerVisible: true,
+      }));
+    } else {
+      await this.historyRepo.save(this.historyRepo.create({
+        orderId: order.id,
+        status: order.status,
+        note: 'No contact email on file — confirmation email not sent',
+        isCustomerVisible: false,
+      }));
     }
 
     const adminEmail = (await this.settingsService.getTyped<string>('admin_notification_email')) || process.env.ADMIN_NOTIFICATION_EMAIL;
@@ -311,8 +326,25 @@ export class OrdersService {
 
         const productName = (item.productSnapshot as { name?: string })?.name ?? 'Gift Card';
 
-        if (codes.length && recipientEmail) {
-          await this.mailService.sendGiftCardDelivery(recipientEmail, recipientName, productName, codes, order.orderNumber).catch(() => {});
+        if (codes.length) {
+          if (recipientEmail) {
+            const sent = await this.mailService.sendGiftCardDelivery(recipientEmail, recipientName, productName, codes, order.orderNumber).catch(() => false);
+            await this.historyRepo.save(this.historyRepo.create({
+              orderId: order.id,
+              status: order.status,
+              note: sent
+                ? `${productName} code emailed to ${recipientEmail}`
+                : `${productName} code generated but email FAILED to send to ${recipientEmail} — check mail configuration`,
+              isCustomerVisible: true,
+            }));
+          } else {
+            await this.historyRepo.save(this.historyRepo.create({
+              orderId: order.id,
+              status: order.status,
+              note: `${productName} code generated but no contact email on file — nothing was sent`,
+              isCustomerVisible: false,
+            }));
+          }
         }
 
         if (shortfall > 0) {

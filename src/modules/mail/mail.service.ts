@@ -41,7 +41,10 @@ export class MailService {
     this.fromEmail = this.smtpFromEmail ?? this.config.get<string>('resend.fromEmail') ?? 'noreply@cgagames.com';
   }
 
-  async send(options: SendMailOptions): Promise<void> {
+  /** Returns whether the email was actually handed off successfully — callers that need to tell
+   * the customer/admin whether delivery really happened (order confirmation, gift-card codes)
+   * should check this instead of assuming success just because the call didn't throw. */
+  async send(options: SendMailOptions): Promise<boolean> {
     if (this.smtpTransport) {
       try {
         await this.smtpTransport.sendMail({
@@ -50,15 +53,16 @@ export class MailService {
           subject: options.subject,
           html: options.html,
         });
+        return true;
       } catch (error) {
         this.logger.error(`Failed to send email (SMTP) to ${options.to}: ${error}`);
+        return false;
       }
-      return;
     }
 
     if (!this.resend) {
       this.logger.warn(`Email not configured — skipping message to ${options.to}`);
-      return;
+      return false;
     }
 
     try {
@@ -68,8 +72,10 @@ export class MailService {
         subject: options.subject,
         html: options.html,
       });
+      return true;
     } catch (error) {
       this.logger.error(`Failed to send email to ${options.to}: ${error}`);
+      return false;
     }
   }
 
@@ -105,8 +111,8 @@ export class MailService {
     orderNumber: string,
     total: number,
     currency: string,
-  ): Promise<void> {
-    await this.send({
+  ): Promise<boolean> {
+    return this.send({
       to,
       subject: `Order Confirmed: #${orderNumber}`,
       html: this.orderConfirmationTemplate(firstName, orderNumber, total, currency),
@@ -157,8 +163,8 @@ export class MailService {
     productName: string,
     codes: string[],
     orderNumber: string,
-  ): Promise<void> {
-    await this.send({
+  ): Promise<boolean> {
+    return this.send({
       to,
       subject: `Your ${productName} code${codes.length > 1 ? 's are' : ' is'} ready! 🎁`,
       html: this.giftCardDeliveryTemplate(firstName, productName, codes, orderNumber),
