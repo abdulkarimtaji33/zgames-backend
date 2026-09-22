@@ -101,6 +101,10 @@ export class PaymentsService {
           amount: Math.round(Number(order.total) * 100),
           currency: (dto.currency ?? 'aed').toLowerCase(),
           metadata: { orderId: dto.orderId, paymentId: payment.id },
+          // Forces the 3D Secure challenge on every card, regardless of the issuer's own risk
+          // score — Stripe's default ("automatic") lets low-risk/low-value charges skip it, which
+          // is what silently happened during manual testing here.
+          payment_method_options: { card: { request_three_d_secure: 'any' } },
         });
         await this.repo.update(payment.id, {
           gatewayPaymentId: pi.id,
