@@ -145,13 +145,22 @@ export class LikeCardService {
     }
   }
 
-  /** Finds the node in LikeCard's category tree whose name contains `categoryName` and returns its direct region sub-categories. */
+  /**
+   * Finds the node in LikeCard's category tree whose name contains `categoryName` and returns its
+   * direct region sub-categories. LikeCard's catalog also contains promotional/duplicate nodes with
+   * the same name nested under unrelated parents (e.g. a childless "Roblox" under "OCTOFFER Back",
+   * alongside the real top-level "Roblox" that actually has region children) — confirmed the real
+   * platform categories (PlayStation, Steam, Xbox, Roblox, Google Play, Amazon, Nintendo, ...) are
+   * always top-level (categoryParentId === "0"), so prefer a top-level match over any nested one
+   * before falling back to the first substring match found at any depth.
+   */
   private findCategoryRegionChildren(categories: LikeCardCategory[], categoryName: string): LikeCardCategory[] {
     const flatten = (nodes: LikeCardCategory[]): LikeCardCategory[] =>
       nodes.flatMap((n) => [n, ...(n.childs ? flatten(n.childs) : [])]);
     const all = flatten(categories);
     const needle = categoryName.trim().toLowerCase();
-    const match = all.find((c) => c.categoryName.trim().toLowerCase().includes(needle));
+    const candidates = all.filter((c) => c.categoryName.trim().toLowerCase().includes(needle));
+    const match = candidates.find((c) => c.categoryParentId === '0') ?? candidates[0];
     if (!match) return [];
     return match.childs ?? [];
   }
