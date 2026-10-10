@@ -403,11 +403,13 @@ export class AuthService {
         : undefined,
     };
 
-    // Access tokens never expire (no `exp` claim signed at all) — sessions are only ended by an
-    // explicit logout (which revokes the refresh token; the access token itself stays valid until
-    // then, same tradeoff any non-expiring token carries).
-    const accessToken = this.jwtService.sign(payload);
-    const expiresIn = 100 * 365 * 24 * 60 * 60;
+    // Admin/staff tokens ('user') carry real operational power (orders, payouts, customer data),
+    // so they get a short lifetime; the frontend already silently calls /auth/refresh on a 401
+    // (see adminClient.ts), so this is invisible to a logged-in admin. A leaked/XSS'd access token
+    // now expires on its own instead of staying valid forever — logout alone used to be the only
+    // thing that stopped it, and logout only ever revoked the refresh token, never the access token.
+    const expiresIn = type === 'user' ? 15 * 60 : 60 * 60;
+    const accessToken = this.jwtService.sign(payload, { expiresIn });
 
     const refreshExpiresInDays = 30;
     const refreshExpiresAt = new Date();
