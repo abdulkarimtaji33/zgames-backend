@@ -36,6 +36,8 @@ export interface CatalogSyncResult {
   regionsFound: Array<{ categoryId: string; categoryName: string; region: ProductRegion }>;
   productsCreated: number;
   productsUpdated: number;
+  /** Previously-synced products under this catalog whose LikeCard product ID was not returned this run — deactivated, never hard-deleted (preserves order history). */
+  productsDeactivated: number;
   skippedNoRegionMatch: string[];
 }
 
@@ -182,8 +184,11 @@ export class LikeCardService {
       regionsFound: [],
       productsCreated: 0,
       productsUpdated: 0,
+      productsDeactivated: 0,
       skippedNoRegionMatch: [],
     };
+
+    const seenLikeCardIds = new Set<string>();
 
     for (const cat of regionCategories) {
       const region = matchRegion(cat.categoryName);
@@ -200,13 +205,52 @@ export class LikeCardService {
           this.logger.log(`Skipping LikeCard demo product "${lcProduct.productName}" (id=${lcProduct.productId})`);
           continue;
         }
+        seenLikeCardIds.add(lcProduct.productId);
         const created = await this.upsertProductFromLikeCard(lcProduct, region, catalog, markupPercentOverride);
         if (created) result.productsCreated++;
         else result.productsUpdated++;
       }
     }
 
+    // Reconcile: anything previously synced under this catalog's SKU prefix that LikeCard didn't
+    // return this run is gone from their catalog (discontinued, or the whole region/category was
+    // removed) — deactivate it rather than deleting, since past orders still reference these rows.
+    result.productsDeactivated = await this.deactivateMissingProducts(catalog.skuPrefix, seenLikeCardIds);
+
     return result;
+  }
+
+  /**
+   * Flips isActive off for every product/variant under `skuPrefix` whose likecardProductId wasn't
+   * in this sync run. Never touches rows that are already inactive. Refuses the bare "LC" prefix
+   * (used by the admin's free-text /sync-category endpoint for an arbitrary category name) because
+   * `sku LIKE 'LC-%'` would then match every LikeCard product across every platform, not just the
+   * one category just synced — that would wrongly deactivate everything else.
+   */
+  private async deactivateMissingProducts(skuPrefix: string, seenLikeCardIds: Set<string>): Promise<number> {
+    if (skuPrefix === 'LC') {
+      this.logger.warn('Skipping stale-product deactivation: skuPrefix "LC" is too generic to scope safely (would match every platform).');
+      return 0;
+    }
+    const stale = await this.variantRepo
+      .createQueryBuilder('v')
+      .innerJoin(Product, 'p', 'p.id = v.productId')
+      .where('p.sku LIKE :prefix', { prefix: `${skuPrefix}-%` })
+      .andWhere('v.likecardProductId IS NOT NULL')
+      .andWhere('p.isActive = true')
+      .select(['v.id AS variantId', 'v.productId AS productId', 'v.likecardProductId AS likecardProductId'])
+      .getRawMany();
+
+    const toDeactivate = stale.filter((r) => !seenLikeCardIds.has(r.likecardProductId));
+    if (toDeactivate.length === 0) return 0;
+
+    const productIds = toDeactivate.map((r) => r.productId);
+    const variantIds = toDeactivate.map((r) => r.variantId);
+    await this.productRepo.createQueryBuilder().update(Product).set({ isActive: false }).whereInIds(productIds).execute();
+    await this.variantRepo.createQueryBuilder().update(ProductVariant).set({ isActive: false }).whereInIds(variantIds).execute();
+
+    this.logger.log(`Deactivated ${toDeactivate.length} product(s) under SKU prefix "${skuPrefix}" — no longer returned by LikeCard`);
+    return toDeactivate.length;
   }
 
   /** Back-compat wrapper — PlayStation was the first platform synced; kept as a thin call into syncCategory(). */
@@ -229,6 +273,7 @@ export class LikeCardService {
       regionsFound: [],
       productsCreated: 0,
       productsUpdated: 0,
+      productsDeactivated: 0,
       skippedNoRegionMatch: [],
       categoriesSynced: [],
       categoriesNotFound: [],
@@ -236,6 +281,7 @@ export class LikeCardService {
 
     for (const catalog of POPULAR_CATALOGS) {
       const result = await this.syncCategory(catalog, markupPercentOverride);
+      combined.productsDeactivated += result.productsDeactivated;
       if (result.regionsFound.length === 0 && result.skippedNoRegionMatch.length === 0) {
         combined.categoriesNotFound.push(catalog.categoryName);
         continue;
@@ -256,6 +302,32 @@ export class LikeCardService {
     return match ? match[0] : productName.replace(/likecard|like4card/gi, '').trim();
   }
 
+  /** Pulls the trailing number out of a denomination string (e.g. "AED 100" -> 100). Null when nothing numeric is found. */
+  private faceValueFromDenomination(denomination: string): number | null {
+    const match = denomination.match(/(\d+(\.\d+)?)/);
+    return match ? parseFloat(match[1]) : null;
+  }
+
+  /**
+   * The card's own face value (e.g. the "100" in "AED 100") *is* the natural selling price for a
+   * gift card — customers pay face value, and the margin comes from LikeCard's cost sitting below
+   * it, never from marking the price up past what the card is actually worth. Falls back to the
+   * markup-based price only when no face value can be parsed (e.g. demo/odd-named products), and
+   * never sells below cost even then.
+   */
+  private priceForProduct(lcProduct: LikeCardProduct, denomination: string, markupPercentOverride?: number): number {
+    const faceValue = this.faceValueFromDenomination(denomination);
+    if (faceValue !== null && faceValue >= lcProduct.productPrice) {
+      return faceValue;
+    }
+    if (faceValue !== null) {
+      this.logger.warn(
+        `LikeCard product ${lcProduct.productId} ("${lcProduct.productName}"): parsed face value ${faceValue} is below cost ${lcProduct.productPrice} — falling back to markup-based pricing instead of selling at a loss.`,
+      );
+    }
+    return this.applyMarkup(lcProduct.productPrice, markupPercentOverride);
+  }
+
   /** Returns true if a new Product was created, false if an existing one was updated. */
   private async upsertProductFromLikeCard(
     lcProduct: LikeCardProduct,
@@ -264,7 +336,8 @@ export class LikeCardService {
     markupPercentOverride?: number,
   ): Promise<boolean> {
     const existingVariant = await this.variantRepo.findOne({ where: { likecardProductId: lcProduct.productId } });
-    const price = this.applyMarkup(lcProduct.productPrice, markupPercentOverride);
+    const denomination = this.extractDenomination(lcProduct.productName);
+    const price = this.priceForProduct(lcProduct, denomination, markupPercentOverride);
     const isActive = lcProduct.available !== false;
     // sellPrice arrives as a string (or absent) — LikeCard's own suggested resale price, kept only
     // as a reference figure for the admin margin view, never applied to our actual price.
@@ -287,7 +360,7 @@ export class LikeCardService {
 
     // Customer-facing name/description are written fresh here — never copy LikeCard's own
     // product name/branding verbatim, since it may reference the wholesale supplier.
-    const displayName = `${catalog.displayLabel} — ${this.regionLabel(region)} — ${this.extractDenomination(lcProduct.productName)}`.trim();
+    const displayName = `${catalog.displayLabel} — ${this.regionLabel(region)} — ${denomination}`.trim();
     const sku = `${catalog.skuPrefix}-${lcProduct.productId}`;
     const slug = await this.generateUniqueSlug(displayName);
     const categoryId = await this.getOrCreateGiftCardsCategory();
