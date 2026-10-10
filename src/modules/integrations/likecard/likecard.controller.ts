@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { LikeCardService } from './likecard.service';
 import { LikeCardApiService } from './likecard-api.service';
@@ -13,6 +13,7 @@ import {
   SyncPlaystationCatalogDto,
   SyncPopularCatalogsDto,
   TestPurchaseDto,
+  UpdateSellingPriceDto,
 } from './dto/likecard.dto';
 import { LIKECARD_TEST_PRODUCT_IDS } from './likecard-test-products';
 
@@ -64,6 +65,18 @@ export class LikeCardController {
   @Get('sync-status')
   syncStatus() {
     return this.likeCardService.getSyncStatus();
+  }
+
+  /** Admin gift-card margin view: every LikeCard product with its cost, LikeCard's suggested price, our price, and margin. */
+  @Get('margin-catalog')
+  marginCatalog() {
+    return this.likeCardService.getMarginCatalog();
+  }
+
+  /** Updates one gift card's selling price from the margin view — costPrice is untouched (only a sync can change it). */
+  @Patch('margin-catalog/:productId/price')
+  updateSellingPrice(@Param('productId') productId: string, @Body() dto: UpdateSellingPriceDto) {
+    return this.likeCardService.updateSellingPrice(productId, dto.price);
   }
 
   /** The LikeCard-supplied product IDs safe to use with POST test-purchase (no real money). */

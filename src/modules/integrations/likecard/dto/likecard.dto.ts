@@ -1,5 +1,5 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
 
 export class SyncPlaystationCatalogDto {
   @ApiPropertyOptional({ description: 'Override the configured flat markup percent for this sync run only' })
@@ -42,6 +42,13 @@ export class ListLikeCardOrdersQueryDto {
   @ApiPropertyOptional() @IsOptional() fromUnixTime?: number;
 
   @ApiPropertyOptional() @IsOptional() toUnixTime?: number;
+}
+
+export class UpdateSellingPriceDto {
+  @ApiProperty({ description: 'New selling price for this gift card (must be > 0)' })
+  @IsNumber()
+  @IsPositive()
+  price: number;
 }
 
 export class GetLikeCardOrderDetailsQueryDto {

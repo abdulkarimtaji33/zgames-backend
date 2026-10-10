@@ -8,7 +8,7 @@ import { Product, ProductRegion, ProductType, ProductPlatform } from '../../prod
 import { ProductVariant } from '../../products/entities/product-variant.entity';
 import { ProductImage } from '../../products/entities/product-image.entity';
 import { Category } from '../../categories/entities/category.entity';
-import { LikeCardCategory, LikeCardProduct } from './likecard.types';
+import { GiftCardMarginRow, LikeCardCategory, LikeCardProduct } from './likecard.types';
 import { LikeCardApiError } from './likecard.exceptions';
 import { isLikeCardTestProductId } from './likecard-test-products';
 import { decryptLikeCardSerial } from './likecard-serial-decryptor';
@@ -266,6 +266,9 @@ export class LikeCardService {
     const existingVariant = await this.variantRepo.findOne({ where: { likecardProductId: lcProduct.productId } });
     const price = this.applyMarkup(lcProduct.productPrice, markupPercentOverride);
     const isActive = lcProduct.available !== false;
+    // sellPrice arrives as a string (or absent) — LikeCard's own suggested resale price, kept only
+    // as a reference figure for the admin margin view, never applied to our actual price.
+    const likecardSellPrice = lcProduct.sellPrice ? parseFloat(lcProduct.sellPrice) : null;
 
     if (existingVariant) {
       existingVariant.price = price;
@@ -275,6 +278,7 @@ export class LikeCardService {
       if (product) {
         product.price = price;
         product.costPrice = lcProduct.productPrice;
+        product.likecardSellPrice = Number.isFinite(likecardSellPrice) ? likecardSellPrice : null;
         product.isActive = isActive;
         await this.productRepo.save(product);
       }
@@ -303,6 +307,7 @@ export class LikeCardService {
       categoryId,
       price,
       costPrice: lcProduct.productPrice,
+      likecardSellPrice: Number.isFinite(likecardSellPrice) ? likecardSellPrice : null,
       isActive,
       shortDescription: `Digital ${catalog.displayLabel} for the ${this.regionLabel(region)} store.`,
     });
@@ -374,6 +379,90 @@ export class LikeCardService {
       linkedVariants: linkedCount,
       totalVariants: total,
       unlinkedProducts: unlinked.map((r) => ({ productId: r.productId, name: r.name, variantId: r.variantId })),
+    };
+  }
+
+  /**
+   * Admin gift-card margin view: every LikeCard-linked product (costPrice is only ever set by this
+   * sync) alongside what LikeCard charges us, what LikeCard suggests reselling at, and what we
+   * actually charge — with the margin pre-computed so the admin screen doesn't have to.
+   */
+  async getMarginCatalog(): Promise<GiftCardMarginRow[]> {
+    const rows = await this.productRepo
+      .createQueryBuilder('p')
+      .innerJoin(ProductVariant, 'v', 'v.productId = p.id AND v.likecardProductId IS NOT NULL')
+      .where('p.costPrice IS NOT NULL')
+      .select([
+        'p.id AS productId',
+        'v.id AS variantId',
+        'p.name AS name',
+        'p.sku AS sku',
+        'p.region AS region',
+        'p.costPrice AS costPrice',
+        'p.likecardSellPrice AS likecardSellPrice',
+        'p.price AS price',
+        'p.isActive AS isActive',
+      ])
+      .orderBy('p.name', 'ASC')
+      .getRawMany();
+
+    return rows.map((r) => {
+      const costPrice = Number(r.costPrice);
+      const price = Number(r.price);
+      const marginAmount = Math.round((price - costPrice) * 100) / 100;
+      const marginPercent = costPrice > 0 ? Math.round((marginAmount / costPrice) * 1000) / 10 : null;
+      return {
+        productId: r.productId,
+        variantId: r.variantId,
+        name: r.name,
+        sku: r.sku,
+        region: r.region,
+        costPrice,
+        likecardSellPrice: r.likecardSellPrice !== null ? Number(r.likecardSellPrice) : null,
+        price,
+        isActive: Boolean(r.isActive),
+        marginAmount,
+        marginPercent,
+      };
+    });
+  }
+
+  /** Updates a gift card's selling price (and its linked LikeCard variant, kept in sync) from the admin margin view — never touches costPrice, which only the next sync can change. */
+  async updateSellingPrice(productId: string, price: number): Promise<GiftCardMarginRow> {
+    const product = await this.productRepo.findOne({ where: { id: productId } });
+    if (!product) throw new BadRequestException('Product not found');
+    if (price <= 0) throw new BadRequestException('Price must be greater than zero');
+
+    product.price = price;
+    await this.productRepo.save(product);
+
+    await this.variantRepo
+      .createQueryBuilder()
+      .update(ProductVariant)
+      .set({ price })
+      .where('productId = :productId AND likecardProductId IS NOT NULL', { productId })
+      .execute();
+    const variant = await this.variantRepo
+      .createQueryBuilder('v')
+      .where('v.productId = :productId AND v.likecardProductId IS NOT NULL', { productId })
+      .getOne();
+
+    const costPrice = Number(product.costPrice ?? 0);
+    const marginAmount = Math.round((price - costPrice) * 100) / 100;
+    const marginPercent = costPrice > 0 ? Math.round((marginAmount / costPrice) * 1000) / 10 : null;
+
+    return {
+      productId: product.id,
+      variantId: variant?.id ?? '',
+      name: product.name,
+      sku: product.sku,
+      region: product.region,
+      costPrice,
+      likecardSellPrice: product.likecardSellPrice !== null ? Number(product.likecardSellPrice) : null,
+      price,
+      isActive: product.isActive,
+      marginAmount,
+      marginPercent,
     };
   }
 

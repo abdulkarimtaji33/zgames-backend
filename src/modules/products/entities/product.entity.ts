@@ -121,6 +121,10 @@ export class Product extends AbstractEntity {
   @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
   costPrice: number | null;
 
+  /** LikeCard's own suggested resale price (their `sellPrice` field) — reference only, never applied automatically. */
+  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  likecardSellPrice: number | null;
+
   @Column({ type: 'decimal', precision: 8, scale: 3, default: 0 })
   weight: number;
 

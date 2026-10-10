@@ -83,3 +83,18 @@ export interface GetOrderDetailsOptions {
   orderId?: string;
   referenceId?: string;
 }
+
+/** One row of the admin gift-card margin view — cost/suggested/actual price plus the pre-computed margin. */
+export interface GiftCardMarginRow {
+  productId: string;
+  variantId: string;
+  name: string;
+  sku: string;
+  region: string;
+  costPrice: number;
+  likecardSellPrice: number | null;
+  price: number;
+  isActive: boolean;
+  marginAmount: number;
+  marginPercent: number | null;
+}
