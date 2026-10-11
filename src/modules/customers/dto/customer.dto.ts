@@ -10,6 +10,7 @@ import {
   Matches,
   IsUUID,
   IsBoolean,
+  IsNumber,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { CustomerGender } from '../entities/customer.entity';
@@ -79,6 +80,31 @@ export class CreateAddressDto {
   @IsOptional()
   @IsString()
   addressLine2?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  area?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  buildingName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  floor?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
 
   @ApiProperty()
   @IsString()

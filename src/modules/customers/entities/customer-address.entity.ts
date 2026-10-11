@@ -25,6 +25,21 @@ export class CustomerAddress extends AbstractEntity {
   @Column({ nullable: true, type: 'text' })
   addressLine2: string | null;
 
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  area: string | null;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  buildingName: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  floor: string | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  latitude: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  longitude: number | null;
+
   @Column({ length: 100 })
   city: string;
 

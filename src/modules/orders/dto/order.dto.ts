@@ -9,6 +9,11 @@ export class OrderAddressDto {
   @ApiProperty() @IsString() phone: string;
   @ApiProperty() @IsString() addressLine1: string;
   @ApiPropertyOptional() @IsOptional() @IsString() addressLine2?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() area?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() buildingName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() floor?: string;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() latitude?: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() longitude?: number;
   @ApiProperty() @IsString() city: string;
   @ApiPropertyOptional() @IsOptional() @IsString() state?: string;
   @ApiProperty() @IsString() countryCode: string;
