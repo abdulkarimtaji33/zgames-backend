@@ -2,12 +2,23 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
 import { Country } from './entities/country.entity';
+import { City } from './entities/city.entity';
 import { CreateCountryDto, UpdateCountryDto, CountryQueryDto } from './dto/country.dto';
 import { buildPaginatedResult, getPaginationOptions } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class CountriesService {
-  constructor(@InjectRepository(Country) private readonly repo: Repository<Country>) {}
+  constructor(
+    @InjectRepository(Country) private readonly repo: Repository<Country>,
+    @InjectRepository(City) private readonly cityRepo: Repository<City>,
+  ) {}
+
+  findCitiesByCountry(countryCode: string) {
+    return this.cityRepo.find({
+      where: { countryCode: countryCode.toUpperCase(), isActive: true },
+      order: { stateName: 'ASC', sortOrder: 'ASC', name: 'ASC' },
+    });
+  }
 
   async findAll(query: CountryQueryDto) {
     const { skip, take } = getPaginationOptions(query.page, query.limit);

@@ -15,6 +15,11 @@ export class CountriesController {
   @Public() @Get('active') @ApiOperation({ summary: 'List active countries' })
   findActive() { return this.svc.findActive(); }
 
+  @Public() @Get('cities') @ApiOperation({ summary: 'List cities for a country, grouped by state' })
+  findCities(@Query('countryCode') countryCode: string) {
+    return this.svc.findCitiesByCountry(countryCode ?? 'AE');
+  }
+
   @Public() @Get(':code/by-code') @ApiOperation({ summary: 'Get country by code' })
   findByCode(@Param('code') code: string) { return this.svc.findByCode(code); }
 
