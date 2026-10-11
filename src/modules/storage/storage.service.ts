@@ -16,7 +16,11 @@ export interface UploadResult {
  * Nest at `${apiUrl}/uploads/...` (wired in main.ts). Every upload gets
  * a fresh random filename, so browsers can never serve a stale cached
  * image for a URL that now points at different content — replacing a
- * category's photo always produces a brand-new URL.
+ * category's photo always produces a brand-new URL. The returned
+ * fileUrl also carries a `?v=<timestamp>` cache-buster on top of that,
+ * belt-and-braces: even if something ever re-saved the same key, the
+ * query string alone forces every cache layer (browser, CDN, Next's
+ * image optimizer) to treat it as a new resource and refetch instantly.
  */
 @Injectable()
 export class StorageService {
@@ -33,7 +37,7 @@ export class StorageService {
     const dir = join(this.uploadsDir, folder);
     if (!existsSync(dir)) await mkdir(dir, { recursive: true });
     await writeFile(join(this.uploadsDir, key), buffer);
-    return { fileUrl: `${this.baseUrl}/${key}`, key };
+    return { fileUrl: `${this.baseUrl}/${key}?v=${Date.now()}`, key };
   }
 
   async deleteFile(key: string): Promise<void> {
@@ -42,7 +46,7 @@ export class StorageService {
   }
 
   extractKeyFromUrl(url: string): string {
-    return url.replace(`${this.baseUrl}/`, '');
+    return url.replace(`${this.baseUrl}/`, '').split('?')[0];
   }
 
   getFileUrl(key: string): string {
