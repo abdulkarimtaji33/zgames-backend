@@ -394,6 +394,40 @@ export class OrdersService {
         }
       }
     }
+
+    await this.maybeAutoCompleteDigitalOrder(order.id).catch((err) =>
+      this.logger.error(`Failed to auto-complete order ${order.orderNumber} after fulfillment: ${err}`),
+    );
+  }
+
+  /** All-digital orders (every item is a gift_card) never pass through the physical
+   * SHIPPED -> DELIVERED flow, so without this they'd sit at PAID/CONFIRMED forever even
+   * once every code has actually been emailed to the customer. Once every item on such an
+   * order is fully fulfilled, mark the order DELIVERED directly (bypassing updateStatus's
+   * transition map, same as addShipment does for the physical flow) — "delivered" is this
+   * order model's closest equivalent to "completed" for a digital-only order. Orders that
+   * mix physical and digital items are left alone; they still need an explicit shipment. */
+  private async maybeAutoCompleteDigitalOrder(orderId: string): Promise<void> {
+    const order = await this.findOne(orderId);
+    const items = order.items ?? [];
+    if (items.length === 0) return;
+
+    const allDigital = items.every((i) => (i.productSnapshot as { type?: string })?.type === ProductType.GIFT_CARD);
+    if (!allDigital) return;
+
+    const allFulfilled = items.every((i) => i.fulfillmentStatus === 'fulfilled');
+    if (!allFulfilled) return;
+
+    const terminal: OrderStatus[] = [OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.REFUNDED, OrderStatus.RETURNED];
+    if (terminal.includes(order.status)) return;
+
+    await this.repo.update(orderId, { status: OrderStatus.DELIVERED });
+    await this.historyRepo.save(this.historyRepo.create({
+      orderId,
+      status: OrderStatus.DELIVERED,
+      note: 'All item codes emailed — order auto-completed',
+      isCustomerVisible: true,
+    }));
   }
 
   /** Lets an admin manually assign a redemption code to an order item stuck pending fulfillment. */
@@ -423,6 +457,10 @@ export class OrdersService {
     if (order.customer?.email) {
       await this.mailService.sendGiftCardDelivery(order.customer.email, order.customer.firstName, productName, [code.trim()], order.orderNumber).catch(() => {});
     }
+
+    await this.maybeAutoCompleteDigitalOrder(orderId).catch((err) =>
+      this.logger.error(`Failed to auto-complete order ${order.orderNumber} after manual fulfillment: ${err}`),
+    );
 
     return this.findOne(orderId);
   }
