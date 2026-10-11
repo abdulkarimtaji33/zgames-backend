@@ -24,4 +24,7 @@ export class TicketQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsEnum(TicketStatus) status?: TicketStatus;
   @ApiPropertyOptional() @IsOptional() @IsEnum(TicketPriority) priority?: TicketPriority;
   @ApiPropertyOptional() @IsOptional() @IsUUID() customerId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() dateTo?: string;
 }

@@ -125,6 +125,8 @@ export class ProductsService {
     if (query.isOnSale) {
       qb.andWhere('p.salePrice IS NOT NULL AND p.salePrice < p.price');
     }
+    if (query.dateFrom) qb.andWhere('p.createdAt >= :from', { from: new Date(query.dateFrom) });
+    if (query.dateTo) qb.andWhere('p.createdAt <= :to', { to: new Date(query.dateTo) });
 
     const sortOrder = query.sortOrder === 'ASC' ? 'ASC' : 'DESC';
     if (query.sortBy === 'soldCount') {

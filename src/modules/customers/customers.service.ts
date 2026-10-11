@@ -51,6 +51,9 @@ export class CustomersService {
       qb.andWhere('customer.isActive = :isActive', { isActive: query.isActive });
     }
 
+    if (query.dateFrom) qb.andWhere('customer.createdAt >= :from', { from: new Date(query.dateFrom) });
+    if (query.dateTo) qb.andWhere('customer.createdAt <= :to', { to: new Date(query.dateTo) });
+
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }

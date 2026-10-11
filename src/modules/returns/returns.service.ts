@@ -28,6 +28,12 @@ export class ReturnsService {
     if (query.status) qb.andWhere('r.status = :s', { s: query.status });
     if (query.customerId) qb.andWhere('r.customerId = :cid', { cid: query.customerId });
     if (query.orderId) qb.andWhere('r.orderId = :oid', { oid: query.orderId });
+    if (query.search) {
+      qb.leftJoin('orders', 'o', 'o.id = r.orderId')
+        .andWhere('(r.reason LIKE :q OR o.orderNumber LIKE :q)', { q: `%${query.search}%` });
+    }
+    if (query.dateFrom) qb.andWhere('r.createdAt >= :from', { from: new Date(query.dateFrom) });
+    if (query.dateTo) qb.andWhere('r.createdAt <= :to', { to: new Date(query.dateTo) });
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }

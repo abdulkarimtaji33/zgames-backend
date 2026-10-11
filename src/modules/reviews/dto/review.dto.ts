@@ -16,4 +16,7 @@ export class ReviewQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsEnum(ReviewStatus) status?: ReviewStatus;
   @ApiPropertyOptional() @IsOptional() @IsUUID() productId?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() customerId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() dateFrom?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() dateTo?: string;
 }

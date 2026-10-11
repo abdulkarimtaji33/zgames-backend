@@ -38,6 +38,10 @@ git pull origin main
 npm ci   # or: npm install
 npm run build
 pm2 restart cgagames-web --update-env
+# Warm up dynamic routes so Turbopack compiles their SSR chunks before
+# real traffic hits them — the very first hit after a restart can race
+# and return a transient 502/ChunkLoadError otherwise.
+sleep 2 && for p in / /admin/products/warmup /admin/orders/warmup /admin/customers/warmup /admin/returns/warmup /admin/support/warmup; do curl -s -o /dev/null "http://127.0.0.1:5555$p"; done
 ```
 
 ---

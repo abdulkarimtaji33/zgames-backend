@@ -26,6 +26,14 @@ export class ReviewsService {
     }
     if (query.productId) qb.andWhere('r.productId = :pid', { pid: query.productId });
     if (query.customerId) qb.andWhere('r.customerId = :cid', { cid: query.customerId });
+    if (query.search) {
+      qb.andWhere(
+        '(r.title LIKE :q OR r.body LIKE :q OR customer.firstName LIKE :q OR customer.lastName LIKE :q OR customer.email LIKE :q)',
+        { q: `%${query.search}%` },
+      );
+    }
+    if (query.dateFrom) qb.andWhere('r.createdAt >= :from', { from: new Date(query.dateFrom) });
+    if (query.dateTo) qb.andWhere('r.createdAt <= :to', { to: new Date(query.dateTo) });
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }

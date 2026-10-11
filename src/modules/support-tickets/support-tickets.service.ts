@@ -29,6 +29,9 @@ export class SupportTicketsService {
     if (query.status) qb.andWhere('t.status = :s', { s: query.status });
     if (query.priority) qb.andWhere('t.priority = :p', { p: query.priority });
     if (query.customerId) qb.andWhere('t.customerId = :cid', { cid: query.customerId });
+    if (query.search) qb.andWhere('t.subject LIKE :q', { q: `%${query.search}%` });
+    if (query.dateFrom) qb.andWhere('t.createdAt >= :from', { from: new Date(query.dateFrom) });
+    if (query.dateTo) qb.andWhere('t.createdAt <= :to', { to: new Date(query.dateTo) });
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query.page ?? 1, query.limit ?? 20);
   }
