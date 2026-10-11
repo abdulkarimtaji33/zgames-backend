@@ -1,82 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-  HeadObjectCommand,
-  GetObjectCommand,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
+import { mkdir, unlink, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
-export interface PresignedUploadResult {
-  uploadUrl: string;
+export interface UploadResult {
   fileUrl: string;
   key: string;
 }
 
+/**
+ * Local-disk storage — no cloud account needed. Files live in
+ * `<repo>/uploads/<folder>/<uuid>.<ext>` and are served statically by
+ * Nest at `${apiUrl}/uploads/...` (wired in main.ts). Every upload gets
+ * a fresh random filename, so browsers can never serve a stale cached
+ * image for a URL that now points at different content — replacing a
+ * category's photo always produces a brand-new URL.
+ */
 @Injectable()
 export class StorageService {
-  private readonly s3: S3Client;
-  private readonly bucket: string;
+  private readonly uploadsDir = join(process.cwd(), 'uploads');
   private readonly baseUrl: string;
 
   constructor(private readonly config: ConfigService) {
-    const region = this.config.get<string>('aws.region')!;
-    const accessKeyId = this.config.get<string>('aws.accessKeyId')!;
-    const secretAccessKey = this.config.get<string>('aws.secretAccessKey')!;
-    this.bucket = this.config.get<string>('aws.bucket')!;
-
-    this.s3 = new S3Client({
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-    });
-
-    this.baseUrl = `https://${this.bucket}.s3.${region}.amazonaws.com`;
+    this.baseUrl = `${this.config.get<string>('apiUrl')}/uploads`;
   }
 
-  async getPresignedUploadUrl(
-    folder: string,
-    fileName: string,
-    contentType: string,
-    expiresIn = 300,
-  ): Promise<PresignedUploadResult> {
-    const ext = fileName.split('.').pop();
+  async saveFile(folder: string, originalName: string, buffer: Buffer): Promise<UploadResult> {
+    const ext = originalName.split('.').pop() || 'bin';
     const key = `${folder}/${uuidv4()}.${ext}`;
-
-    const command = new PutObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-      ContentType: contentType,
-    });
-
-    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn });
-
-    return {
-      uploadUrl,
-      fileUrl: `${this.baseUrl}/${key}`,
-      key,
-    };
-  }
-
-  async getPresignedDownloadUrl(key: string, expiresIn = 3600): Promise<string> {
-    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
-    return getSignedUrl(this.s3, command, { expiresIn });
+    const dir = join(this.uploadsDir, folder);
+    if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+    await writeFile(join(this.uploadsDir, key), buffer);
+    return { fileUrl: `${this.baseUrl}/${key}`, key };
   }
 
   async deleteFile(key: string): Promise<void> {
-    const command = new DeleteObjectCommand({ Bucket: this.bucket, Key: key });
-    await this.s3.send(command);
-  }
-
-  async fileExists(key: string): Promise<boolean> {
-    try {
-      await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
-      return true;
-    } catch {
-      return false;
-    }
+    const filePath = join(this.uploadsDir, key);
+    if (existsSync(filePath)) await unlink(filePath);
   }
 
   extractKeyFromUrl(url: string): string {

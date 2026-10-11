@@ -25,3 +25,7 @@ Thumbs.db
 
 # test
 *.tsbuildinfo
+
+# Locally-stored admin uploads (categories/products/brands/etc. images) —
+# persists across deploys, never committed
+/uploads
